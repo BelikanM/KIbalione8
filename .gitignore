@@ -1,0 +1,31 @@
+# Fichiers sensibles
+.env
+.env.docx
+
+# Dossiers volumineux / générés
+generated/
+generated_content/
+cptu_data/
+graphs/
+maps/
+pdfs/
+uploads/
+videos/
+vectordb/
+
+# JSON sensibles à ignorer si nécessaire
+metadata.json
+trajectories.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs
+*.log
+
+# OS spécifiques
+.DS_Store
+Thumbs.db
