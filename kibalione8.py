@@ -8,10 +8,10 @@ import numpy as np
 import pickle
 import json
 from huggingface_hub import InferenceClient
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.docstore.document import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_core.documents import Document
 from shapely.geometry import Point
 import io
 from PIL import Image
@@ -24,7 +24,8 @@ from sklearn.cluster import KMeans
 import torch
 from torchvision import models, transforms
 from langchain_huggingface import HuggingFaceEndpoint
-from langchain.agents import initialize_agent, Tool
+from langchain.agents import initialize_agent
+from langchain_core.tools import Tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 from transformers import pipeline
@@ -47,6 +48,7 @@ from dotenv import load_dotenv
 PROJECT_DIR = os.path.expanduser('~/RAG_ChatBot')  # Chemin corrigé vers le dossier contenant les données et poids
 CHATBOT_DIR = PROJECT_DIR
 VECTORDB_PATH = os.path.join(CHATBOT_DIR, "vectordb")
+CHAT_VECTORDB_PATH = os.path.join(CHATBOT_DIR, "chat_vectordb")  # AJOUT MÉMOIRE VECTORIELLE: Base dédiée pour l'historique chat
 PDFS_PATH = os.path.join(CHATBOT_DIR, "pdfs")
 GRAPHS_PATH = os.path.join(CHATBOT_DIR, "graphs")
 MAPS_PATH = os.path.join(CHATBOT_DIR, "maps")
@@ -118,6 +120,7 @@ def setup_drive():
     os.makedirs(GRAPHS_PATH, exist_ok=True)
     os.makedirs(MAPS_PATH, exist_ok=True)
     os.makedirs(GENERATED_PATH, exist_ok=True)
+    os.makedirs(os.path.dirname(CHAT_VECTORDB_PATH), exist_ok=True)  # AJOUT MÉMOIRE VECTORIELLE: Dossier pour chat_vectordb
     st.write(f"📁 Dossier principal : {CHATBOT_DIR}")
     return True
 
@@ -178,21 +181,67 @@ def load_existing_graph():
     except Exception as e:
         return None, None, f"❌ Erreur: {e}"
 
+@st.cache_resource
+def get_embedding_model():
+    """Modèle d'embedding en cache pour éviter rechargement"""
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    return HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_kwargs={'device': device}
+    )
+
+# AJOUT MÉMOIRE VECTORIELLE: Fonctions pour la mémoire chat
+def load_chat_vectordb():
+    """Charger la base vectorielle pour l'historique chat"""
+    if not os.path.exists(CHAT_VECTORDB_PATH):
+        return None, "⚠️ Aucune base chat trouvée"
+    embedding_model = get_embedding_model()
+    try:
+        chat_vectordb = FAISS.load_local(CHAT_VECTORDB_PATH, embedding_model, allow_dangerous_deserialization=True)
+        return chat_vectordb, "✅ Base chat chargée"
+    except Exception as e:
+        return None, f"❌ Erreur chat: {e}"
+
+def add_to_chat_db(user_msg, ai_msg, chat_vectordb):
+    """Ajouter un échange user-AI à la base chat"""
+    if chat_vectordb is None:
+        embedding_model = get_embedding_model()
+        chat_vectordb = FAISS.from_texts([""], embedding_model)  # Créer si vide
+    exchange = f"User: {user_msg} ||| Assistant: {ai_msg}"
+    doc = Document(
+        page_content=exchange,
+        metadata={"type": "chat_exchange", "timestamp": time.time()}
+    )
+    chat_vectordb.add_documents([doc])
+    chat_vectordb.save_local(CHAT_VECTORDB_PATH)
+    return chat_vectordb
+
+def chat_rag_search(question, chat_vectordb, k=3):
+    """Rechercher dans l'historique chat pour contexte"""
+    if not chat_vectordb:
+        return []
+    try:
+        return chat_vectordb.similarity_search(question, k=k)
+    except Exception as e:
+        st.write(f"❌ Erreur recherche chat: {e}")
+        return []
+
 def process_pdfs():
     """Traiter les PDFs"""
     st.write("📄 Traitement des PDFs...")
-    embedding_model = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    embedding_model = get_embedding_model()
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=100
     )
     # Charger vectordb existante si elle existe
+    vectordb = None
     if os.path.exists(VECTORDB_PATH):
-        vectordb, _ = load_vectordb()
-    else:
-        vectordb = None
+        try:
+            vectordb, _ = load_vectordb()
+        except Exception as e:
+            st.write(f"⚠️ Erreur chargement vectordb existante: {e}. Création nouvelle.")
+            vectordb = None
     # Charger métadonnées existantes
     if os.path.exists(METADATA_PATH):
         with open(METADATA_PATH, 'r', encoding='utf-8') as f:
@@ -204,18 +253,33 @@ def process_pdfs():
     pdf_files = [f for f in os.listdir(PDFS_PATH) if f.endswith('.pdf')] if os.path.exists(PDFS_PATH) else []
     if not pdf_files:
         return vectordb, "⚠️ Aucun PDF trouvé"
+    
+    # Check préliminaire : si aucun nouveau, skip
+    new_pdfs = [f for f in pdf_files if f not in processed_filenames]
+    if not new_pdfs:
+        return vectordb, "✅ Tous les PDFs déjà traités. Base à jour !"
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     new_chunks_count = 0
     new_processed = []
+    total_pdfs = len(new_pdfs)
+    current_pdf = 0
     for pdf_file in pdf_files:
         if pdf_file in processed_filenames:
             st.write(f" 📖 {pdf_file} déjà traité, sauté.")
             continue
         pdf_path = os.path.join(PDFS_PATH, pdf_file)
         st.write(f" 📖 Traitement nouveau PDF : {pdf_file}")
+        status_text.text(f"Traitement de {pdf_file}...")
         text = extract_text_from_pdf(pdf_path)
         if not text.strip():
             continue
-        chunks = text_splitter.split_text(text)
+        try:
+            chunks = text_splitter.split_text(text)
+        except Exception as e:
+            st.write(f"❌ Erreur split text pour {pdf_file}: {e}")
+            continue
         for i, chunk in enumerate(chunks):
             doc = Document(
                 page_content=chunk,
@@ -228,6 +292,10 @@ def process_pdfs():
             all_documents.append(doc)
         new_processed.append({"filename": pdf_file, "chunks": len(chunks)})
         new_chunks_count += len(chunks)
+        current_pdf += 1
+        progress = current_pdf / total_pdfs if total_pdfs > 0 else 1
+        progress_bar.progress(progress)
+    status_text.text("Finalisation...")
     # Ajouter les trajets sauvegardés (toujours, car ils peuvent changer)
     if os.path.exists(TRAJECTORIES_PATH):
         with open(TRAJECTORIES_PATH, 'r', encoding='utf-8') as f:
@@ -243,26 +311,31 @@ Distance: {traj.get('distance', 0)/1000:.2f} km"""
             )
             all_documents.append(doc)
     if all_documents:
-        if vectordb is None:
-            vectordb = FAISS.from_documents(all_documents, embedding_model)
-        else:
-            vectordb.add_documents(all_documents)
-        vectordb.save_local(VECTORDB_PATH)
-    # Mettre à jour métadonnées
-    metadata["processed_files"].extend(new_processed)
-    metadata["total_chunks"] += new_chunks_count
-    with open(METADATA_PATH, 'w', encoding='utf-8') as f:
-        json.dump(metadata, f, indent=2, ensure_ascii=False)
+        try:
+            if vectordb is None:
+                vectordb = FAISS.from_documents(all_documents, embedding_model)
+            else:
+                vectordb.add_documents(all_documents)
+            vectordb.save_local(VECTORDB_PATH)
+        except Exception as e:
+            st.write(f"❌ Erreur sauvegarde vectordb: {e}")
+            return None, "❌ Échec sauvegarde base"
+    # Mettre à jour métadonnées seulement si changements
+    if new_processed:
+        metadata["processed_files"].extend(new_processed)
+        metadata["total_chunks"] += new_chunks_count
+        with open(METADATA_PATH, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
+    progress_bar.progress(1)
+    status_text.text("Terminé !")
     return vectordb, f"✅ Base mise à jour : {len(new_processed)} nouveaux PDFs traités, {new_chunks_count} nouveaux chunks (total : {metadata['total_chunks']})"
 
 def load_vectordb():
     """Charger la base vectorielle"""
     if not os.path.exists(VECTORDB_PATH):
         return None, "⚠️ Aucune base trouvée"
+    embedding_model = get_embedding_model()
     try:
-        embedding_model = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
-        )
         vectordb = FAISS.load_local(VECTORDB_PATH, embedding_model, allow_dangerous_deserialization=True)
         return vectordb, "✅ Base chargée"
     except Exception as e:
@@ -344,6 +417,7 @@ def get_cache_stats():
 # ===============================================
 # Fonctions RAG et Web Search Améliorées
 # ===============================================
+@st.cache_resource
 def create_client():
     """Créer le client Inference avec gestion d'erreurs améliorée"""
     try:
@@ -499,7 +573,7 @@ def intelligent_query_expansion(query):
                 expanded_queries.append(f"{query} {expansion}")
     return expanded_queries[:3]  # Limiter à 3 requêtes max
 
-def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search_type="both"):
+def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search_type="both", chat_vectordb=None):  # AJOUT MÉMOIRE VECTORIELLE: Param pour chat_vectordb
     """
     Recherche hybride améliorée combinant RAG local et web avec intelligence
     Args:
@@ -508,6 +582,7 @@ def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search
         k: Nombre de résultats RAG
         web_search_enabled: Activer la recherche web
         search_type: Type de recherche web
+        chat_vectordb: Base pour historique chat (optionnel)
     Returns:
         Liste de documents combinés et enrichis
     """
@@ -518,6 +593,13 @@ def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search
         doc.metadata['search_source'] = 'local_rag'
         doc.metadata['relevance_score'] = 1.0  # Score max pour les docs locaux
     all_results.extend(local_docs)
+    # AJOUT MÉMOIRE VECTORIELLE: Recherche dans historique chat pour contexte conversationnel
+    if chat_vectordb:
+        chat_docs = chat_rag_search(query, chat_vectordb, k=3)
+        for doc in chat_docs:
+            doc.metadata['search_source'] = 'chat_history'
+            doc.metadata['relevance_score'] = 0.9
+        all_results.extend(chat_docs[:2])  # Limiter à 2 pour éviter surcharge
     # 2. Recherche web intelligente si activée
     if web_search_enabled:
         st.write(f"🌐 Recherche web activée pour: {query}")
@@ -589,6 +671,7 @@ def generate_answer_enhanced(question, context_docs, model_name, include_sources
         context_parts = []
         local_sources = []
         web_sources = []
+        chat_sources = []  # AJOUT MÉMOIRE VECTORIELLE: Sources pour historique chat
         for i, doc in enumerate(context_docs):
             source = doc.metadata.get('source', 'Document inconnu')
             doc_type = doc.metadata.get('type', 'unknown')
@@ -597,21 +680,24 @@ def generate_answer_enhanced(question, context_docs, model_name, include_sources
             # Classifier les sources
             if search_source == 'local_rag':
                 local_sources.append(f"[{i+1}] {source} ({doc_type})")
+            elif search_source == 'chat_history':
+                chat_sources.append(f"[{i+1}] Historique précédent: {source}")
             else:
                 web_sources.append(f"[{i+1}] {source}")
             context_parts.append(f"[Source {i+1} - {doc_type}]\n{content}")
         context = "\n\n".join(context_parts)
-    # Prompt amélioré avec instructions pour les sources
-    prompt = f"""Tu es un assistant IA intelligent qui répond aux questions en utilisant à la fois des documents locaux et des informations web récentes.
-CONTEXTE DISPONIBLE:
+    # Prompt amélioré avec instructions pour les sources (ajout chat)
+    prompt = f"""Tu es un assistant IA intelligent qui répond aux questions en utilisant à la fois des documents locaux, l'historique des conversations passées, et des informations web récentes.
+CONTEXTE DISPONIBLE (incluant historique pour continuité):
 {context}
 QUESTION: {question}
 INSTRUCTIONS:
+- Utilise l'historique chat pour maintenir la fluidité et rappeler les échanges précédents
 - Utilise toutes les sources disponibles pour donner une réponse complète et précise
-- Si les informations web contredisent les documents locaux, mentionne les deux perspectives
+- Si les informations web contredisent les documents locaux ou l'historique, mentionne les deux perspectives
 - Privilégie les informations récentes pour les sujets d'actualité
 - Sois précis et cite tes sources si nécessaire
-- Si certaines informations manquent, dis-le clairement
+- Si certaines informations manquent, dis-le clairement et propose de clarifier basé sur l'historique
 RÉPONSE DÉTAILLÉE:"""
     try:
         client = create_client()
@@ -626,6 +712,10 @@ RÉPONSE DÉTAILLÉE:"""
         # Ajouter les sources si demandé
         if include_sources and context_docs:
             sources_text = "\n\n📚 **Sources consultées:**\n"
+            if chat_sources:  # AJOUT MÉMOIRE VECTORIELLE
+                sources_text += "**Historique conversation:**\n"
+                for source in chat_sources[:2]:
+                    sources_text += f"• {source}\n"
             if local_sources:
                 sources_text += "**Documents locaux:**\n"
                 for source in local_sources[:3]:  # Limiter l'affichage
@@ -673,17 +763,19 @@ def final_search(question, vectordb, graph, pois):
 # ===============================================
 # Fonctions Modèles Hugging Face Spécialisés
 # ===============================================
+@st.cache_resource
 def initialize_specialized_models():
     """Initialise les modèles spécialisés avec gestion d'erreurs"""
+    device_id = 0 if torch.cuda.is_available() else -1
     models = {}
     try:
-        models['summarizer'] = pipeline("summarization", model="facebook/bart-large-cnn")
+        models['summarizer'] = pipeline("summarization", model="facebook/bart-large-cnn", device=device_id)
         st.write("✅ Modèle de résumé chargé")
     except Exception as e:
         st.write(f"⚠️ Erreur chargement summarizer: {e}")
         models['summarizer'] = None
     try:
-        models['translator'] = pipeline("translation", model="Helsinki-NLP/opus-mt-fr-en")
+        models['translator'] = pipeline("translation", model="Helsinki-NLP/opus-mt-fr-en", device=device_id)
         st.write("✅ Modèle de traduction chargé")
     except Exception as e:
         st.write(f"⚠️ Erreur chargement translator: {e}")
@@ -695,8 +787,9 @@ def initialize_specialized_models():
         st.write(f"⚠️ Erreur chargement captioner: {e}")
         models['captioner'] = None
     try:
-        models['ner'] = pipeline("ner", model="dbmdz/bert-large-cased-finetuned-conll03-english")
+        models['ner'] = pipeline("ner", model="dbmdz/bert-large-cased-finetuned-conll03-english", device=device_id)
         st.write("✅ Modèle NER chargé")
+        st.write("⚠️ Warning NER ignoré : weights pooler non utilisés (normal pour ce checkpoint).")
     except Exception as e:
         st.write(f"⚠️ Erreur chargement NER: {e}")
         models['ner'] = None
@@ -816,7 +909,7 @@ def generate_image_to_3d(image_path):
 # ===============================================
 # Agent LangChain Amélioré avec Recherche Web
 # ===============================================
-def create_enhanced_agent(model_name, vectordb, graph, pois):
+def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None):  # AJOUT MÉMOIRE VECTORIELLE: Param pour chat
     """
     Crée un agent LangChain amélioré avec capacités de recherche web
     Args:
@@ -824,6 +917,7 @@ def create_enhanced_agent(model_name, vectordb, graph, pois):
         vectordb: Base vectorielle locale
         graph: Graphe OSM
         pois: Points d'intérêt
+        chat_vectordb: Base pour historique chat (optionnel)
     Returns:
         Agent configuré avec tous les outils
     """
@@ -850,6 +944,11 @@ def create_enhanced_agent(model_name, vectordb, graph, pois):
                 description="Recherche dans la base de connaissances locale (PDFs et documents internes). Utilise ceci en PREMIER pour les questions sur des documents spécifiques."
             ),
             Tool(
+                name="Chat_History_Search",  # AJOUT MÉMOIRE VECTORIELLE: Nouvel outil pour historique
+                func=lambda q: "\n\n".join([d.page_content for d in chat_rag_search(q, chat_vectordb, k=3)]),
+                description="Recherche dans l'historique des conversations passées pour maintenir la continuité. Utilise pour les suites de discussion."
+            ),
+            Tool(
                 name="Web_Search",
                 func=lambda q: search_tool.run(q),
                 description="Recherche sur Internet pour des informations récentes, actualités, ou des connaissances générales non disponibles localement."
@@ -861,8 +960,8 @@ def create_enhanced_agent(model_name, vectordb, graph, pois):
             ),
             Tool(
                 name="Hybrid_Search",
-                func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=3, web_search_enabled=True)]),
-                description="Recherche hybride combinant base locale ET web. Idéal pour des questions nécessitant à la fois des données internes et externes."
+                func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=3, web_search_enabled=True, chat_vectordb=chat_vectordb)]),
+                description="Recherche hybride combinant base locale, historique chat ET web. Idéal pour des questions nécessitant à la fois des données internes, passées et externes."
             ),
             Tool(
                 name="Current_News_Search",
@@ -927,23 +1026,25 @@ def create_enhanced_agent(model_name, vectordb, graph, pois):
                 description="Génère un modèle 3D (rendue image) à partir d'une image. Fournis le chemin vers un fichier image."
             ),
         ]
-        # Configuration de l'agent avec prompt personnalisé
+        # Configuration de l'agent avec prompt personnalisé (ajout chat)
         agent_prompt = """Tu es Kibali, un assistant IA avancé avec accès à de multiples sources d'information.
 CAPACITÉS DISPONIBLES:
 - Base de connaissances locale (PDFs et documents)
+- Historique des conversations passées pour continuité
 - Recherche web en temps réel
 - Calcul d'itinéraires sur cartes OSM
 - Analyse d'images et extraction de contenu web
 - Traduction et résumé automatiques
 - Génération d'images, vidéos, sons et modèles 3D à partir de texte ou images
 INSTRUCTIONS IMPORTANTES:
-1. Utilise TOUJOURS la base locale en premier pour les questions sur des documents spécifiques
-2. Combine les sources locales ET web pour des réponses complètes
-3. Pour les actualités ou infos récentes, privilégie la recherche web
-4. Cite tes sources et indique leur provenance (locale vs web)
-5. Si les informations se contredisent, mentionne les deux perspectives
-6. Reste concis mais informatif
-7. Pour les générations, sauvegarde les fichiers et retourne le chemin
+1. Utilise TOUJOURS l'historique chat en premier pour les suites de discussion
+2. Utilise la base locale en premier pour les questions sur des documents spécifiques
+3. Combine les sources locales, historique ET web pour des réponses complètes
+4. Pour les actualités ou infos récentes, privilégie la recherche web
+5. Cite tes sources et indique leur provenance (locale vs historique vs web)
+6. Si les informations se contredisent, mentionne les deux perspectives
+7. Reste concis mais informatif
+8. Pour les générations, sauvegarde les fichiers et retourne le chemin
 Tu as accès aux outils suivants: {tools}
 Utilise le format suivant:
 Question: la question d'entrée
@@ -1433,9 +1534,9 @@ ANALYSE AMÉLIORÉE:"""
     except Exception as e:
         return f"❌ Erreur: {str(e)}"
 
-def update_agent(model_choice, vectordb, graph, pois):
+def update_agent(model_choice, vectordb, graph, pois, chat_vectordb=None):  # AJOUT MÉMOIRE VECTORIELLE
     model_name = WORKING_MODELS[model_choice]
-    agent = create_enhanced_agent(model_name, vectordb, graph, pois)
+    agent = create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb)
     cache_info = get_cache_stats()
     return model_name, agent, cache_info
 
@@ -1449,23 +1550,28 @@ def handle_clear_cache():
         return f"❌ Erreur: {e}"
 
 def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph, pois, web_enabled):
+    # AJOUT MÉMOIRE VECTORIELLE: Charger la base chat
+    chat_vectordb, _ = load_chat_vectordb()
     if not message.strip():
         return ""
     if agent is None:
-        model_name, agent, _ = update_agent(model_choice, vectordb, graph, pois)
+        model_name, agent, _ = update_agent(model_choice, vectordb, graph, pois, chat_vectordb)
     try:
         if not web_enabled:
-            docs = rag_search(message, vectordb, k=3)
+            # Recherche hybride incluant chat
+            docs = hybrid_search_enhanced(message, vectordb, k=3, web_search_enabled=False, chat_vectordb=chat_vectordb)
             response = generate_answer_enhanced(message, docs, WORKING_MODELS[model_choice], include_sources=True)
         else:
             response = agent.run(message)
     except Exception as e:
         response = f"❌ Erreur: {e}\n\nTentative avec recherche locale..."
         try:
-            docs = rag_search(message, vectordb, k=3)
+            docs = hybrid_search_enhanced(message, vectordb, k=3, web_search_enabled=False, chat_vectordb=chat_vectordb)
             response = generate_answer_enhanced(message, docs, WORKING_MODELS[model_choice])
         except:
             response = f"❌ Erreur complète: {e}"
+    # AJOUT MÉMOIRE VECTORIELLE: Sauvegarder l'échange dans la base chat
+    chat_vectordb = add_to_chat_db(message, response, chat_vectordb)
     return response
 
 def handle_web_search(query, search_type):
@@ -1525,6 +1631,7 @@ def get_system_status():
         },
         "files": {
             "vectordb": os.path.exists(VECTORDB_PATH),
+            "chat_vectordb": os.path.exists(CHAT_VECTORDB_PATH),  # AJOUT MÉMOIRE VECTORIELLE
             "metadata": os.path.exists(METADATA_PATH),
             "trajectories": os.path.exists(TRAJECTORIES_PATH),
             "web_cache": os.path.exists(WEB_CACHE_PATH)
@@ -1563,6 +1670,7 @@ def export_system_config():
         "paths": {
             "chatbot_dir": CHATBOT_DIR,
             "vectordb_path": VECTORDB_PATH,
+            "chat_vectordb_path": CHAT_VECTORDB_PATH,  # AJOUT MÉMOIRE VECTORIELLE
             "pdfs_path": PDFS_PATH,
             "graphs_path": GRAPHS_PATH,
             "maps_path": MAPS_PATH
@@ -1574,7 +1682,8 @@ def export_system_config():
             "osm_routing": True,
             "image_analysis": True,
             "pdf_processing": True,
-            "caching": True
+            "caching": True,
+            "chat_memory": True  # AJOUT MÉMOIRE VECTORIELLE
         }
     }
     config_path = os.path.join(CHATBOT_DIR, "system_config.json")
@@ -1606,6 +1715,12 @@ def test_all_features():
         results["vectordb"] = vectordb is not None
     except:
         results["vectordb"] = False
+    # Test base chat  # AJOUT MÉMOIRE VECTORIELLE
+    try:
+        chat_vectordb, _ = load_chat_vectordb()
+        results["chat_vectordb"] = chat_vectordb is not None
+    except:
+        results["chat_vectordb"] = False
     # Test graphe OSM
     try:
         graph, pois, _ = load_existing_graph()
@@ -1665,6 +1780,7 @@ class KibaliAPI:
     """API simplifiée pour utiliser Kibali depuis du code externe"""
     def __init__(self):
         self.vectordb = None
+        self.chat_vectordb = None  # AJOUT MÉMOIRE VECTORIELLE
         self.graph = None
         self.pois = []
         self.client = None
@@ -1677,6 +1793,7 @@ class KibaliAPI:
         try:
             setup_drive()
             self.vectordb, _ = load_vectordb()
+            self.chat_vectordb, _ = load_chat_vectordb()  # AJOUT MÉMOIRE VECTORIELLE
             self.graph, self.pois, _ = load_existing_graph()
             self.client = create_client()
         except Exception as e:
@@ -1686,7 +1803,7 @@ class KibaliAPI:
         """Pose une question simple"""
         try:
             if use_web:
-                docs = hybrid_search_enhanced(question, self.vectordb, web_search_enabled=True)
+                docs = hybrid_search_enhanced(question, self.vectordb, web_search_enabled=True, chat_vectordb=self.chat_vectordb)  # AJOUT MÉMOIRE VECTORIELLE
             else:
                 docs = rag_search(question, self.vectordb)
             return generate_answer_enhanced(question, docs, self.model_name)
@@ -1720,32 +1837,111 @@ kibali_api = KibaliAPI()
 # ===============================================
 # Interface Streamlit Améliorée
 # ===============================================
-st.title("🗺️ Kibali 🌟 - Assistant IA Avancé")
+st.markdown("""
+<style>
+    .stApp {
+        background: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%);
+        color: #e0e0e0;
+    }
+    .sidebar .sidebar-content {
+        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+    }
+    .stSidebar > div {
+        background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+    }
+    .stChatMessage {
+        background: white;
+        border-radius: 18px;
+        border-left: 4px solid #10a37f;
+        margin: 5px 0;
+        padding: 12px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        color: black !important;
+    }
+    .stTextInput > div > div > input {
+        background: rgba(255,255,255,0.1);
+        border: 1px solid #667eea;
+        border-radius: 20px;
+        color: white;
+        padding: 10px 15px;
+    }
+    .stButton > button {
+        background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 20px;
+        padding: 10px 20px;
+        font-weight: bold;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        transition: all 0.3s ease;
+        width: 100%;
+        margin-bottom: 10px;
+    }
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(0,0,0,0.4);
+    }
+    .stSelectbox > div > div > select {
+        background: rgba(255,255,255,0.1);
+        border: 1px solid #667eea;
+        border-radius: 10px;
+        color: white;
+    }
+    .stCheckbox > div > label {
+        color: #e0e0e0;
+    }
+    h1, h2, h3 {
+        color: #667eea;
+        text-shadow: 0 0 10px rgba(102, 126, 234, 0.5);
+    }
+    .chat-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(26, 26, 46, 0.95);
+        border-top: 1px solid #667eea;
+        padding: 10px;
+        z-index: 1000;
+    }
+    @media (max-width: 768px) {
+        .chat-footer {
+            padding: 5px;
+        }
+        .stTextInput input {
+            font-size: 14px;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚙️ Configuration", "💬 Chat RAG + Web", "🗺️ Trajets", "📸 Analyse Image", "🌐 Recherche Web"])
-
-with tab1:
-    st.markdown("### Gestion des données et configuration")
+# Sidebar pour options
+with st.sidebar:
+    st.markdown("<h2 style='color: white; text-align: center;'>⚙️ Options</h2>", unsafe_allow_html=True)
+    st.markdown("---")
     
-    # Initialisation des états de session pour les messages dynamiques (correction de l'erreur)
+    # Initialisation des états de session
     if 'status_msg' not in st.session_state:
         st.session_state.status_msg = ""
     if 'cache_msg' not in st.session_state:
-        st.session_state.cache_msg = get_cache_stats()  # Valeur initiale
+        st.session_state.cache_msg = get_cache_stats()
     
-    pdf_upload = st.file_uploader("📤 Upload PDFs", type="pdf", accept_multiple_files=True)
-    pbf_upload = st.file_uploader("📤 Upload fichier OSM (.pbf)", type="osm.pbf")
-    process_pdfs_btn = st.button("🔄 Traiter PDFs")
-    load_graph_btn = st.button("📂 Charger graphe existant")
-    load_vectordb_btn = st.button("📂 Charger base vectorielle")
-    clear_cache_btn = st.button("🗑️ Vider cache web")
+    # Uploads et boutons config
+    pdf_upload = st.file_uploader("📤 Upload PDFs", type="pdf", accept_multiple_files=True, key="pdf_sidebar")
+    pbf_upload = st.file_uploader("📤 Upload OSM (.pbf)", type="osm.pbf", key="pbf_sidebar")
+    process_pdfs_btn = st.button("🔄 Traiter PDFs", key="process_sidebar")
+    load_graph_btn = st.button("📂 Charger graphe", key="load_graph_sidebar")
+    load_vectordb_btn = st.button("📂 Charger DB", key="load_db_sidebar")
+    clear_cache_btn = st.button("🗑️ Vider cache", key="clear_cache_sidebar")
     
-    # Widgets avec value lié à session_state et key pour réactivité
-    status_display = st.text_area("📊 Statut", value=st.session_state.status_msg, height=100, key='status_display')
-    cache_stats = st.text_area("📈 Statistiques cache web", value=st.session_state.cache_msg, height=50, key='cache_stats')
-
+    st.markdown("---")
+    status_display = st.text_area("📊 Statut", value=st.session_state.status_msg, height=100, key='status_sidebar')
+    cache_stats = st.text_area("📈 Cache", value=st.session_state.cache_msg, height=50, key='cache_sidebar')
+    
     if "vectordb" not in st.session_state:
         st.session_state.vectordb = None
+    if "chat_vectordb" not in st.session_state:  # AJOUT MÉMOIRE VECTORIELLE
+        st.session_state.chat_vectordb = None
     if "graph" not in st.session_state:
         st.session_state.graph = None
     if "pois" not in st.session_state:
@@ -1758,37 +1954,38 @@ with tab1:
     if pdf_upload:
         files = upload_pdfs(pdf_upload)
         st.session_state.status_msg = f"✅ {len(files)} PDFs uploadés" if files else "⚠️ Aucun PDF"
-        st.rerun()
+        # Pas de rerun ici : file_uploader gère déjà
 
     if pbf_upload:
         st.session_state.graph, st.session_state.pois, msg = upload_and_process_pbf(pbf_upload)
         st.session_state.status_msg = msg
-        model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()))
-        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois)
+        model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()), key="model_sidebar")
+        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, st.session_state.chat_vectordb)  # AJOUT MÉMOIRE VECTORIELLE
         st.session_state.cache_msg = cache_info
         st.rerun()
 
     if process_pdfs_btn:
         st.session_state.vectordb, msg = process_pdfs()
         st.session_state.status_msg = msg
-        model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()))
-        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois)
+        model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()), key="model_process")
+        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, st.session_state.chat_vectordb)  # AJOUT MÉMOIRE VECTORIELLE
         st.session_state.cache_msg = cache_info
         st.rerun()
 
     if load_graph_btn:
         st.session_state.graph, st.session_state.pois, msg = load_existing_graph()
         st.session_state.status_msg = msg
-        model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()))
-        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois)
+        model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()), key="model_load_graph")
+        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, st.session_state.chat_vectordb)  # AJOUT MÉMOIRE VECTORIELLE
         st.session_state.cache_msg = cache_info
         st.rerun()
 
     if load_vectordb_btn:
         st.session_state.vectordb, msg = load_vectordb()
         st.session_state.status_msg = msg
-        model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()))
-        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois)
+        model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()), key="model_load_db")
+        st.session_state.chat_vectordb, _ = load_chat_vectordb()  # AJOUT MÉMOIRE VECTORIELLE: Charger chat db
+        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, st.session_state.chat_vectordb)
         st.session_state.cache_msg = cache_info
         st.rerun()
 
@@ -1798,86 +1995,95 @@ with tab1:
         st.session_state.cache_msg = get_cache_stats()
         st.rerun()
 
-with tab2:
-    st.markdown("### Assistant IA avec recherche web intégrée")
-    model_dropdown = st.selectbox("🎯 Modèle", list(WORKING_MODELS.keys()))
-    web_search_toggle = st.checkbox("🌐 Recherche web activée", value=True)
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    for msg in st.session_state.chat_history:
-        st.write(msg["role"] + ": " + msg["content"])
-    question = st.text_input("Pose une question...")
-    if st.button("📤 Envoyer"):
-        response = handle_chat_enhanced(question, st.session_state.chat_history, st.session_state.agent, model_dropdown, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, web_search_toggle)
-        st.session_state.chat_history.append({"role": "user", "content": question})
-        st.session_state.chat_history.append({"role": "assistant", "content": response})
-        st.rerun()
+# Main area - Chat principal
+st.title("🗺️ Kibali 🌟 - Assistant IA Avancé")
+main_container = st.container()
+with main_container:
+    # Onglets pour autres fonctionnalités
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ Trajets", "📸 Analyse Image", "🌐 Recherche Web", "💬 Chat", "📊 Status"])
 
-with tab3:
-    st.markdown("""
-    ### Calcul de trajets
-    **Exemples:** "Comment aller de l'école à l'hôpital ?"
-    """)
-    trajectory_input = st.text_area("🗺️ Question de trajet")
-    if st.button("🚀 Calculer trajet"):
-        carte_buf, reponse, traj_info = calculer_trajet(trajectory_input, st.session_state.graph, st.session_state.pois)
-        st.text_area("📋 Détails", reponse)
-        if carte_buf:
-            carte_buf.seek(0)
-            st.image(Image.open(carte_buf))
-        if traj_info:
-            if st.button("💾 Sauvegarder trajet"):
-                save_trajectory(trajectory_input, reponse, traj_info)
-                st.write("✅ Trajet sauvegardé")
+    with tab1:
+        st.markdown("""
+        ### Calcul de trajets
+        **Exemples:** "Comment aller de l'école à l'hôpital ?"
+        """)
+        trajectory_input = st.text_area("🗺️ Question de trajet", key="traj_input")
+        if st.button("🚀 Calculer trajet", key="calc_traj"):
+            carte_buf, reponse, traj_info = calculer_trajet(trajectory_input, st.session_state.graph, st.session_state.pois)
+            st.text_area("📋 Détails", reponse, key="traj_details")
+            if carte_buf:
+                carte_buf.seek(0)
+                st.image(Image.open(carte_buf), key="traj_map")
+            if traj_info:
+                if st.button("💾 Sauvegarder trajet", key="save_traj"):
+                    save_trajectory(trajectory_input, reponse, traj_info)
+                    st.write("✅ Trajet sauvegardé")
 
-with tab4:
-    st.markdown("""
-    ### Analyse d'images
-    Upload une image pour analyse détaillée, annotations, graphiques et amélioration IA.
-    """)
-    image_upload = st.file_uploader("📤 Upload Image", type=["jpg", "png"])
-    if image_upload and st.button("🔍 Analyser"):
-        analysis_data, proc_images, tables_str = process_image(image_upload.getvalue())
-        improved_analysis = improve_analysis_with_llm(analysis_data, st.session_state.current_model)
-        st.image(proc_images, caption=["Image analysée"])
-        st.markdown(tables_str, unsafe_allow_html=True)
-        st.text_area("Analyse Améliorée (IA)", improved_analysis)
+    with tab2:
+        st.markdown("""
+        ### Analyse d'images
+        Upload une image pour analyse détaillée, annotations, graphiques et amélioration IA.
+        """)
+        image_upload = st.file_uploader("📤 Upload Image", type=["jpg", "png"], key="img_upload")
+        if image_upload and st.button("🔍 Analyser", key="analyze_img"):
+            analysis_data, proc_images, tables_str = process_image(image_upload.getvalue())
+            improved_analysis = improve_analysis_with_llm(analysis_data, st.session_state.current_model)
+            st.image(proc_images, caption=proc_images, width=400)  # Responsive width
+            st.markdown(tables_str, unsafe_allow_html=True)
+            st.text_area("Analyse Améliorée (IA)", improved_analysis, key="img_analysis")
 
-with tab5:
-    st.markdown("""
-    ### Recherche web avancée avec extraction de contenu
-    """)
-    web_query = st.text_area("🔍 Requête de recherche")
-    search_type = st.selectbox("Type de recherche", ["text", "news", "both"])
-    if st.button("🔍 Rechercher"):
-        results = handle_web_search(web_query, search_type)
-        st.markdown(results, unsafe_allow_html=True)
-    url_extract = st.text_input("🌐 URL à extraire")
-    if st.button("📄 Extraire contenu"):
-        content = handle_content_extraction(url_extract)
-        st.text_area("Contenu extrait", content)
+    with tab3:
+        st.markdown("""
+        ### Recherche web avancée avec extraction de contenu
+        """)
+        web_query = st.text_area("🔍 Requête de recherche", key="web_query")
+        search_type = st.selectbox("Type de recherche", ["text", "news", "both"], key="search_type")
+        if st.button("🔍 Rechercher", key="search_btn"):
+            results = handle_web_search(web_query, search_type)
+            st.markdown(results, unsafe_allow_html=True)
+        url_extract = st.text_input("🌐 URL à extraire", key="url_extract")
+        if st.button("📄 Extraire contenu", key="extract_btn"):
+            content = handle_content_extraction(url_extract)
+            st.text_area("Contenu extrait", content, key="extracted_content")
 
-# ===============================================
-# Lancement principal
-# ===============================================
-if __name__ == "__main__":
-    st.write("🚀 Kibali 🌟 - Assistant IA Avancé avec Recherche Web")
-    setup_drive()
-    st.write(f"📁 Dossier unifié: {CHATBOT_DIR}")
-    st.write(f"🔑 Token HF configuré: {HF_TOKEN[:10]}...")
-    st.write(f"🌐 Recherche web intégrée")
-    existing_graphs = [f for f in os.listdir(GRAPHS_PATH) if f.endswith('_graph.graphml')] if os.path.exists(GRAPHS_PATH) else []
-    existing_pdfs = [f for f in os.listdir(PDFS_PATH) if f.endswith('.pdf')] if os.path.exists(PDFS_PATH) else []
-    st.write(f"📊 État initial:")
-    st.write(f" 🗺️ Graphes OSM: {len(existing_graphs)}")
-    st.write(f" 📄 PDFs: {len(existing_pdfs)}")
-    st.write(f" 💾 Base vectorielle: {'✅' if os.path.exists(VECTORDB_PATH) else '❌'}")
-    st.write(f" 🌐 Cache web: {'✅' if os.path.exists(WEB_CACHE_PATH) else '❌'}")
-    st.write(f" 📈 {get_cache_stats()}")
+    with tab4:
+        st.markdown("### Assistant IA avec recherche web intégrée")
+        web_search_toggle = st.checkbox("🌐 Recherche web activée", value=True, key="web_toggle")
+        if "chat_history" not in st.session_state:
+            st.session_state.chat_history = []
+        for msg in st.session_state.chat_history:
+            with st.chat_message(msg["role"], avatar="☁️" if msg["role"] == "user" else "⭐"):
+                st.write(msg["content"])
+        if prompt := st.chat_input("Pose une question...", key="chat_input"):
+            with st.chat_message("user", avatar="☁️"):
+                st.write(prompt)
+            with st.chat_message("assistant", avatar="⭐"):
+                with st.spinner("Réponse en cours..."):
+                    response = handle_chat_enhanced(prompt, st.session_state.chat_history, st.session_state.agent, list(WORKING_MODELS.keys())[0], st.session_state.vectordb, st.session_state.graph, st.session_state.pois, web_search_toggle)
+                    st.write(response)
+            st.session_state.chat_history.append({"role": "user", "content": prompt})
+            st.session_state.chat_history.append({"role": "assistant", "content": response})
 
-# ===============================================
-# Messages de fin et documentation
-# ===============================================
+    with tab5:
+        st.markdown("### Statut système")
+        st.json(get_system_status())
+
+st.markdown("### 📊 Informations Système")
+setup_drive()
+st.write(f"🚀 Kibali 🌟 - Assistant IA Avancé avec Recherche Web")
+st.write(f"📁 Dossier unifié: {CHATBOT_DIR}")
+st.write(f"🔑 Token HF configuré: {HF_TOKEN[:10]}...")
+st.write(f"🌐 Recherche web intégrée")
+existing_graphs = [f for f in os.listdir(GRAPHS_PATH) if f.endswith('_graph.graphml')] if os.path.exists(GRAPHS_PATH) else []
+existing_pdfs = [f for f in os.listdir(PDFS_PATH) if f.endswith('.pdf')] if os.path.exists(PDFS_PATH) else []
+st.write(f"📊 État initial:")
+st.write(f" 🗺️ Graphes OSM: {len(existing_graphs)}")
+st.write(f" 📄 PDFs: {len(existing_pdfs)}")
+st.write(f" 💾 Base vectorielle: {'✅' if os.path.exists(VECTORDB_PATH) else '❌'}")
+st.write(f" 🧠 Mémoire chat: {'✅' if os.path.exists(CHAT_VECTORDB_PATH) else '❌'}")  # AJOUT MÉMOIRE VECTORIELLE
+st.write(f" 🌐 Cache web: {'✅' if os.path.exists(WEB_CACHE_PATH) else '❌'}")
+st.write(f" 📈 {get_cache_stats()}")
+
 st.write("\n" + "="*60)
 st.write("🎉 KIBALI 🌟 - SYSTÈME CHARGÉ AVEC SUCCÈS")
 st.write("="*60)
@@ -1886,8 +2092,10 @@ st.write(f"🔑 Token HF: {'✅ Configuré' if HF_TOKEN else '❌ Manquant'}")
 st.write(f"📁 Dossier: {CHATBOT_DIR}")
 st.write(f"🌐 Recherche web: ✅ Activée")
 st.write(f"💾 Cache intelligent: ✅ Activé")
+st.write(f"🧠 Mémoire vectorielle chat: ✅ Activée")  # AJOUT MÉMOIRE VECTORIELLE
 st.write("\n📚 FONCTIONNALITÉS PRINCIPALES:")
 st.write(" 💬 Chat RAG avec recherche web intelligent")
+st.write(" 🧠 Mémoire des conversations pour fluidité")  # AJOUT MÉMOIRE VECTORIELLE
 st.write(" 🗺️ Calcul de trajets OSM")
 st.write(" 📸 Analyse d'images avec IA")
 st.write(" 🌐 Extraction de contenu web")
