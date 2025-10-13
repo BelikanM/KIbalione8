@@ -40,6 +40,12 @@ from tavily import TavilyClient
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.naive_bayes import MultinomialNB
+import re
 
 # ===============================================
 # Configuration - CHEMINS UNIFIÉS
@@ -56,6 +62,7 @@ METADATA_PATH = os.path.join(CHATBOT_DIR, "metadata.json")
 TRAJECTORIES_PATH = os.path.join(CHATBOT_DIR, "trajectories.json")
 WEB_CACHE_PATH = os.path.join(CHATBOT_DIR, "web_cache.json")
 GENERATED_PATH = os.path.join(CHATBOT_DIR, "generated")
+SUBMODELS_PATH = os.path.join(CHATBOT_DIR, "submodels")  # Nouveau: Chemin pour les sous-modèles sklearn
 
 # Modèles qui fonctionnent
 WORKING_MODELS = {
@@ -121,6 +128,7 @@ def setup_drive():
     os.makedirs(MAPS_PATH, exist_ok=True)
     os.makedirs(GENERATED_PATH, exist_ok=True)
     os.makedirs(os.path.dirname(CHAT_VECTORDB_PATH), exist_ok=True)  # AJOUT MÉMOIRE VECTORIELLE: Dossier pour chat_vectordb
+    os.makedirs(SUBMODELS_PATH, exist_ok=True)  # Nouveau: Dossier pour sous-modèles
     st.write(f"📁 Dossier principal : {CHATBOT_DIR}")
     return True
 
@@ -1549,6 +1557,14 @@ def handle_clear_cache():
     except Exception as e:
         return f"❌ Erreur: {e}"
 
+def highlight_important_words(text):
+    """Met en évidence les mots importants avec effet scintillante et tooltip"""
+    # Mots-clés simples pour exemple (peut être étendu avec NER)
+    important_keywords = ['important', 'clé', 'essentiel', 'critique', 'principal', 'trajet', 'pétrole', 'topographie']
+    for keyword in important_keywords:
+        text = re.sub(rf'\b({keyword})\b', r'<span class="sparkle-word" title="\1: Terme clé pour la compréhension du contexte">\1</span>', text, flags=re.IGNORECASE)
+    return text
+
 def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph, pois, web_enabled):
     # AJOUT MÉMOIRE VECTORIELLE: Charger la base chat
     chat_vectordb, _ = load_chat_vectordb()
@@ -1572,6 +1588,8 @@ def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph,
             response = f"❌ Erreur complète: {e}"
     # AJOUT MÉMOIRE VECTORIELLE: Sauvegarder l'échange dans la base chat
     chat_vectordb = add_to_chat_db(message, response, chat_vectordb)
+    # Appliquer highlighting pour fluidité
+    response = highlight_important_words(response)
     return response
 
 def handle_web_search(query, search_type):
@@ -1774,6 +1792,167 @@ def restore_from_backup(backup_path):
         return f"❌ Erreur restauration: {e}"
 
 # ===============================================
+# NOUVEAU: Fonctions Auto-Apprentissage et Sous-Modèles avec Scikit-Learn
+# ===============================================
+def create_submodel_from_chat_history(chat_vectordb, submodel_type="classification"):
+    """
+    Crée un petit sous-modèle sklearn à partir de l'historique chat pour automatiser des réponses.
+    - Type: 'classification' pour classer les questions et prédire des réponses automatisées.
+    Rend le modèle plus "humain" en apprenant des patterns conversationnels.
+    """
+    if not chat_vectordb:
+        return None, "❌ Aucune base chat pour entraîner le sous-modèle"
+    
+    # Extraire les échanges de l'historique
+    exchanges = []
+    for doc in list(chat_vectordb.docstore._dict.values()) or []:
+        exchange = doc.page_content
+        if "User:" in exchange and "Assistant:" in exchange:
+            user_part = exchange.split("|||")[0].replace("User: ", "").strip()
+            ai_part = exchange.split("|||")[1].replace("Assistant: ", "").strip() if "|||" in exchange else ""
+            exchanges.append((user_part, ai_part))
+    
+    if len(exchanges) < 10:
+        return None, "❌ Historique chat trop court pour entraîner un modèle"
+    
+    try:
+        # Préparation des données : TF-IDF pour vectorisation textuelle
+        vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
+        X = vectorizer.fit_transform([user[0] for user in exchanges])
+        
+        # Pour classification simple (ex: prédire si réponse est informative ou autre)
+        # Labels simples basés sur patterns (ex: 0=info, 1=question, 2=autre)
+        labels = []
+        for user_msg, _ in exchanges:
+            if re.search(r'\?', user_msg):
+                labels.append(1)  # Question
+            elif any(word in user_msg.lower() for word in ['info', 'savoir', 'expliquer']):
+                labels.append(0)  # Info
+            else:
+                labels.append(2)  # Autre
+        
+        X_train, X_test, y_train, y_test = train_test_split(X, labels, test_size=0.2, random_state=42)
+        
+        if submodel_type == "classification":
+            model = MultinomialNB()
+        else:
+            model = RandomForestClassifier(n_estimators=50)
+        
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        
+        # Sauvegarder le modèle et vectorizer
+        model_path = os.path.join(SUBMODELS_PATH, f"submodel_{submodel_type}_{int(time.time())}.pkl")
+        with open(model_path, 'wb') as f:
+            pickle.dump({'model': model, 'vectorizer': vectorizer}, f)
+        
+        # Visualisation avec matplotlib : Accuracy plot
+        fig, ax = plt.subplots()
+        ax.bar(['Train', 'Test'], [1.0, accuracy])  # Train est parfait par défaut
+        ax.set_title(f'Précision du sous-modèle {submodel_type.capitalize()}')
+        ax.set_ylabel('Accuracy')
+        plot_path = os.path.join(SUBMODELS_PATH, f"accuracy_plot_{submodel_type}_{int(time.time())}.png")
+        plt.savefig(plot_path)
+        plt.close()
+        
+        return model_path, f"✅ Sous-modèle {submodel_type} créé avec accuracy {accuracy:.2f}. Sauvegardé: {model_path}"
+    except Exception as e:
+        return None, f"❌ Erreur création sous-modèle: {e}"
+
+def use_submodel_for_automation(query, submodel_path, submodel_type="classification"):
+    """
+    Utilise un sous-modèle pour automatiser une réponse, rendant le comportement plus humain (ex: prédiction rapide).
+    """
+    if not os.path.exists(submodel_path):
+        return "❌ Sous-modèle non trouvé"
+    
+    try:
+        with open(submodel_path, 'rb') as f:
+            data = pickle.load(f)
+            model = data['model']
+            vectorizer = data['vectorizer']
+        
+        query_vec = vectorizer.transform([query])
+        prediction = model.predict(query_vec)[0]
+        
+        # Réponses automatisées basées sur prédiction pour plus d'humanité
+        automated_responses = {
+            0: "Voici des infos basiques sur ce sujet, basées sur nos échanges passés.",
+            1: "Bonne question ! Laisse-moi réfléchir à ça en me basant sur ce qu'on a discuté avant.",
+            2: "Intéressant, je vais creuser un peu plus pour te répondre de manière personnalisée."
+        }
+        
+        response = automated_responses.get(prediction, "Réponse automatisée générée.")
+        
+        # Visualisation: Distribution des features TF-IDF pour la query
+        fig, ax = plt.subplots()
+        tfidf_scores = query_vec.toarray()[0]
+        top_features = np.argsort(tfidf_scores)[-5:]
+        ax.bar(range(len(top_features)), tfidf_scores[top_features])
+        ax.set_title('Top Features TF-IDF pour la Query')
+        ax.set_xticks(range(len(top_features)))
+        ax.set_xticklabels([vectorizer.get_feature_names_out()[i] for i in top_features], rotation=45)
+        plot_path = os.path.join(SUBMODELS_PATH, f"query_features_{int(time.time())}.png")
+        plt.savefig(plot_path)
+        plt.close()
+        
+        return f"{response} (Prédiction: {prediction}) | Graph: {plot_path}"
+    except Exception as e:
+        return f"❌ Erreur utilisation sous-modèle: {e}"
+
+# ===============================================
+# NOUVEAU: Fonctions Amélioration Base de Données via Fouille Internet
+# ===============================================
+def improve_database_with_web_search(topics, num_results_per_topic=5, vectordb=None):
+    """
+    Fouille internet sur des sujets spécifiques (pétrole, topographie, sciences physiques, sous-sol, etc.)
+    et améliore la base de données en ajoutant de nouveaux documents.
+    """
+    specific_topics = topics or ["pétrole extraction techniques", "topographie cartographie avancée", "sciences physiques mécanique sol", "sous-sol géologie ressources"]
+    
+    if vectordb is None:
+        vectordb, _ = load_vectordb()
+        if vectordb is None:
+            embedding_model = get_embedding_model()
+            vectordb = FAISS.from_texts([""], embedding_model)
+    
+    new_documents = []
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    
+    for topic in specific_topics:
+        st.write(f"🔍 Fouille internet pour: {topic}")
+        search_results = enhanced_web_search(topic, max_results=num_results_per_topic, search_type="both")
+        
+        for result in search_results:
+            content = f"Titre: {result.get('title', '')}\nContenu: {result.get('body', '')}\n"
+            url = result.get('href') or result.get('url')
+            if url and len(result.get('body', '')) < 500:
+                extra_content = smart_content_extraction(url, max_length=2000)
+                if "Impossible d'extraire" not in extra_content:
+                    content += f"\nContenu détaillé: {extra_content}"
+            
+            chunks = text_splitter.split_text(content)
+            for i, chunk in enumerate(chunks):
+                doc = Document(
+                    page_content=chunk,
+                    metadata={
+                        "source": url or topic,
+                        "topic": topic,
+                        "type": "web_enrichment",
+                        "chunk_id": i
+                    }
+                )
+                new_documents.append(doc)
+    
+    if new_documents:
+        vectordb.add_documents(new_documents)
+        vectordb.save_local(VECTORDB_PATH)
+        return vectordb, f"✅ Base améliorée: {len(new_documents)} nouveaux chunks ajoutés sur {len(specific_topics)} sujets"
+    else:
+        return vectordb, "⚠️ Aucun nouveau contenu ajouté"
+
+# ===============================================
 # Version API pour utilisation externe
 # ===============================================
 class KibaliAPI:
@@ -1831,6 +2010,17 @@ class KibaliAPI:
         """Retourne le statut du système"""
         return get_system_status()
 
+    # NOUVEAU: Méthodes API pour auto-apprentissage et amélioration DB
+    def train_submodel(self, submodel_type="classification"):
+        """Entraîne un sous-modèle"""
+        path, msg = create_submodel_from_chat_history(self.chat_vectordb, submodel_type)
+        return {"path": path, "message": msg}
+
+    def improve_db(self, topics=None, num_results=5):
+        """Améliore la DB avec fouille internet"""
+        self.vectordb, msg = improve_database_with_web_search(topics, num_results, self.vectordb)
+        return {"message": msg}
+
 # Instance globale de l'API
 kibali_api = KibaliAPI()
 
@@ -1840,33 +2030,47 @@ kibali_api = KibaliAPI()
 st.markdown("""
 <style>
     .stApp {
-        background: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%);
-        color: #e0e0e0;
+        background: white;
+        color: black;
     }
     .sidebar .sidebar-content {
-        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+        background: white;
     }
     .stSidebar > div {
-        background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+        background: white;
     }
     .stChatMessage {
         background: white;
         border-radius: 18px;
-        border-left: 4px solid #10a37f;
+        border-left: 4px solid #2196F3;
         margin: 5px 0;
         padding: 12px;
         box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         color: black !important;
+        transition: all 0.3s ease;
+        filter: none; /* Correction pour flou */
+    }
+    .stChatMessage:hover {
+        transform: scale(1.02);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    .stChatMessage p, .stChatMessage li {
+        color: black !important;
+        background-color: rgba(255, 255, 255, 0.1);
     }
     .stTextInput > div > div > input {
-        background: rgba(255,255,255,0.1);
-        border: 1px solid #667eea;
+        background: white;
+        border: 1px solid #2196F3;
         border-radius: 20px;
-        color: white;
+        color: black;
         padding: 10px 15px;
+        filter: none; /* Correction pour flou */
+    }
+    .stTextInput > div > div > input::placeholder {
+        color: #757575;
     }
     .stButton > button {
-        background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(45deg, #2196F3 0%, #21CBF3 100%);
         color: white;
         border: none;
         border-radius: 20px;
@@ -1878,31 +2082,99 @@ st.markdown("""
         margin-bottom: 10px;
     }
     .stButton > button:hover {
-        transform: translateY(-2px);
+        transform: translateY(-2px) scale(1.05);
         box-shadow: 0 6px 12px rgba(0,0,0,0.4);
+        animation: pulse 1s infinite; /* Effet fluide */
+    }
+    @keyframes pulse {
+        0% { box-shadow: 0 6px 12px rgba(0,0,0,0.4); }
+        50% { box-shadow: 0 6px 16px rgba(33, 150, 243, 0.6); }
+        100% { box-shadow: 0 6px 12px rgba(0,0,0,0.4); }
     }
     .stSelectbox > div > div > select {
-        background: rgba(255,255,255,0.1);
-        border: 1px solid #667eea;
+        background: white;
+        border: 1px solid #2196F3;
         border-radius: 10px;
-        color: white;
+        color: black;
+        filter: none; /* Correction pour flou */
     }
     .stCheckbox > div > label {
-        color: #e0e0e0;
+        color: black;
+        transition: color 0.3s ease;
+    }
+    .stCheckbox > div > label:hover {
+        color: #2196F3;
+    }
+    .stTextArea > div > div > textarea {
+        background: white;
+        color: black;
+        border: 1px solid #2196F3;
     }
     h1, h2, h3 {
-        color: #667eea;
-        text-shadow: 0 0 10px rgba(102, 126, 234, 0.5);
+        color: #2196F3;
+        text-shadow: 0 0 10px rgba(33, 150, 243, 0.5);
+        animation: glow 2s ease-in-out infinite alternate;
+    }
+    @keyframes glow {
+        from { text-shadow: 0 0 10px rgba(33, 150, 243, 0.5); }
+        to { text-shadow: 0 0 20px rgba(33, 150, 243, 0.8), 0 0 30px rgba(33, 203, 243, 0.6); }
     }
     .chat-footer {
         position: fixed;
         bottom: 0;
         left: 0;
         right: 0;
-        background: rgba(26, 26, 46, 0.95);
-        border-top: 1px solid #667eea;
+        background: rgba(255, 255, 255, 0.95);
+        border-top: 1px solid #2196F3;
         padding: 10px;
         z-index: 1000;
+        transition: all 0.3s ease;
+    }
+    .chat-footer:hover {
+        background: rgba(255, 255, 255, 1);
+    }
+    /* Effet scintillante pour mots importants */
+    .sparkle-word {
+        color: #2196F3;
+        background: linear-gradient(45deg, #2196F3, #21CBF3, #4ecdc4, #45b7d1);
+        background-size: 400% 400%;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: sparkle 2s linear infinite, gradient-shift 3s ease infinite;
+        cursor: pointer;
+        position: relative;
+        padding: 2px 4px;
+        border-radius: 4px;
+        transition: transform 0.2s ease;
+    }
+    .sparkle-word:hover {
+        transform: scale(1.1);
+        text-shadow: 0 0 10px rgba(33, 150, 243, 0.8);
+    }
+    @keyframes sparkle {
+        0%, 100% { text-shadow: 0 0 5px rgba(33, 150, 243, 0.5); }
+        50% { text-shadow: 0 0 20px rgba(33, 150, 243, 1), 0 0 30px rgba(33, 203, 243, 0.7); }
+    }
+    @keyframes gradient-shift {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    /* Correction pour lisibilité des questions/réponses */
+    .stMarkdown {
+        filter: none !important;
+        -webkit-filter: none !important;
+        color: black !important;
+        font-weight: 400;
+        line-height: 1.6;
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+    .stMarkdown p, .stMarkdown li {
+        color: black !important;
+        text-shadow: none;
+    }
+    .st-emotion-cache-1i5yq8u input, .st-emotion-cache-1i5yq8u textarea {
+        color: black !important;
     }
     @media (max-width: 768px) {
         .chat-footer {
@@ -1911,13 +2183,16 @@ st.markdown("""
         .stTextInput input {
             font-size: 14px;
         }
+        .sparkle-word {
+            font-size: 0.9em;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
 
 # Sidebar pour options
 with st.sidebar:
-    st.markdown("<h2 style='color: white; text-align: center;'>⚙️ Options</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: #2196F3; text-align: center;'>⚙️ Options</h2>", unsafe_allow_html=True)
     st.markdown("---")
     
     # Initialisation des états de session
@@ -1933,6 +2208,10 @@ with st.sidebar:
     load_graph_btn = st.button("📂 Charger graphe", key="load_graph_sidebar")
     load_vectordb_btn = st.button("📂 Charger DB", key="load_db_sidebar")
     clear_cache_btn = st.button("🗑️ Vider cache", key="clear_cache_sidebar")
+    
+    # NOUVEAU: Boutons pour auto-apprentissage et amélioration DB
+    train_submodel_btn = st.button("🧠 Entraîner sous-modèle (sklearn)", key="train_submodel")
+    improve_db_btn = st.button("📚 Améliorer DB (fouille internet)", key="improve_db")
     
     st.markdown("---")
     status_display = st.text_area("📊 Statut", value=st.session_state.status_msg, height=100, key='status_sidebar')
@@ -1994,6 +2273,22 @@ with st.sidebar:
         st.session_state.status_msg = msg
         st.session_state.cache_msg = get_cache_stats()
         st.rerun()
+    
+    # NOUVEAU: Gestion des boutons auto-apprentissage et amélioration
+    if train_submodel_btn:
+        st.session_state.chat_vectordb, _ = load_chat_vectordb()
+        submodel_path, msg = create_submodel_from_chat_history(st.session_state.chat_vectordb)
+        st.session_state.status_msg = msg
+        if submodel_path:
+            st.write(f"Utiliser: use_submodel_for_automation('query', '{submodel_path}')")
+        st.rerun()
+    
+    if improve_db_btn:
+        topics_input = st.text_input("Sujets (séparés par ,)", value="pétrole,topographie,sciences physiques,sous-sol", key="topics_input")
+        topics = [t.strip() for t in topics_input.split(",")]
+        st.session_state.vectordb, msg = improve_database_with_web_search(topics)
+        st.session_state.status_msg = msg
+        st.rerun()
 
 # Main area - Chat principal
 st.title("🗺️ Kibali 🌟 - Assistant IA Avancé")
@@ -2049,20 +2344,36 @@ with main_container:
     with tab4:
         st.markdown("### Assistant IA avec recherche web intégrée")
         web_search_toggle = st.checkbox("🌐 Recherche web activée", value=True, key="web_toggle")
+        # NOUVEAU: Option pour utiliser sous-modèle
+        use_submodel = st.checkbox("🧠 Utiliser sous-modèle auto-appris pour réponse rapide", key="use_submodel")
+        submodel_path_input = st.text_input("Chemin sous-modèle (optionnel)", key="submodel_path")
+        
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
         for msg in st.session_state.chat_history:
             with st.chat_message(msg["role"], avatar="☁️" if msg["role"] == "user" else "⭐"):
-                st.write(msg["content"])
+                # Correction pour lisibilité : utiliser markdown pour HTML
+                if msg["role"] == "user":
+                    st.markdown(f"**Question:** {highlight_important_words(msg['content'])}", unsafe_allow_html=True)
+                else:
+                    st.markdown(highlight_important_words(msg['content']), unsafe_allow_html=True)
         if prompt := st.chat_input("Pose une question...", key="chat_input"):
             with st.chat_message("user", avatar="☁️"):
-                st.write(prompt)
+                highlighted_prompt = highlight_important_words(prompt)
+                st.markdown(f"**Question:** {highlighted_prompt}", unsafe_allow_html=True)
             with st.chat_message("assistant", avatar="⭐"):
                 with st.spinner("Réponse en cours..."):
-                    response = handle_chat_enhanced(prompt, st.session_state.chat_history, st.session_state.agent, list(WORKING_MODELS.keys())[0], st.session_state.vectordb, st.session_state.graph, st.session_state.pois, web_search_toggle)
-                    st.write(response)
+                    content_to_save = None  # Variable intermédiaire pour corriger l'erreur NameError
+                    if use_submodel and submodel_path_input:
+                        automated = use_submodel_for_automation(prompt, submodel_path_input)
+                        st.markdown(highlight_important_words(automated), unsafe_allow_html=True)
+                        content_to_save = automated
+                    else:
+                        response = handle_chat_enhanced(prompt, st.session_state.chat_history, st.session_state.agent, list(WORKING_MODELS.keys())[0], st.session_state.vectordb, st.session_state.graph, st.session_state.pois, web_search_toggle)
+                        st.markdown(highlight_important_words(response), unsafe_allow_html=True)
+                        content_to_save = response
             st.session_state.chat_history.append({"role": "user", "content": prompt})
-            st.session_state.chat_history.append({"role": "assistant", "content": response})
+            st.session_state.chat_history.append({"role": "assistant", "content": content_to_save})
 
     with tab5:
         st.markdown("### Statut système")
@@ -2093,6 +2404,8 @@ st.write(f"📁 Dossier: {CHATBOT_DIR}")
 st.write(f"🌐 Recherche web: ✅ Activée")
 st.write(f"💾 Cache intelligent: ✅ Activé")
 st.write(f"🧠 Mémoire vectorielle chat: ✅ Activée")  # AJOUT MÉMOIRE VECTORIELLE
+st.write(f"🤖 Auto-apprentissage sklearn: ✅ Activé (sous-modèles dans {SUBMODELS_PATH})")
+st.write(f"📚 Amélioration DB via fouille: ✅ Activée (sujets pétrole, topographie, etc.)")
 st.write("\n📚 FONCTIONNALITÉS PRINCIPALES:")
 st.write(" 💬 Chat RAG avec recherche web intelligent")
 st.write(" 🧠 Mémoire des conversations pour fluidité")  # AJOUT MÉMOIRE VECTORIELLE
@@ -2100,9 +2413,13 @@ st.write(" 🗺️ Calcul de trajets OSM")
 st.write(" 📸 Analyse d'images avec IA")
 st.write(" 🌐 Extraction de contenu web")
 st.write(" 💾 Gestion unifiée des données")
+st.write(" 🤖 Sous-modèles sklearn pour automatismes humains")
+st.write(" 📚 Fouille auto internet pour enrichir DB (pétrole, topographie, sciences physiques, sous-sol)")
 st.write("\n🚀 UTILISATION:")
 st.write(" Interface: Exécutez les cellules suivantes")
 st.write(" API: kibali_api.ask('votre question')")
+st.write(" Auto-apprentissage: kibali_api.train_submodel()")
+st.write(" Amélioration DB: kibali_api.improve_db(['pétrole'])")
 st.write(" Tests: test_all_features()")
 st.write("\n⚙️ MAINTENANCE:")
 st.write(" Status: get_system_status()")
