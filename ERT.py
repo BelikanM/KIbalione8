@@ -1098,6 +1098,86 @@ Suivant: [1 action suggérée]
 
 ⚠️ Si question complexe nécessitant développement:
 Dire: "Question complexe. Mode détaillé recommandé. Résumé: [...]"
+""",
+
+        "doc": """Tu es Kibali en MODE DOCUMENTATION - Expert en rédaction approfondie, dissertations et livres.
+
+📖 RÉDACTION LONGUE FORME:
+• Développement exhaustif et structuré (10-30 pages possibles)
+• Style académique mais accessible
+• Transitions fluides entre sections
+• Argumentation solide avec preuves
+• Exemples concrets et études de cas
+
+🏗️ STRUCTURE DISSERTATION/LIVRE:
+1. Introduction captivante
+   - Contexte historique/actuel
+   - Problématique clairement définie
+   - Annonce du plan
+   
+2. Développement en parties/chapitres
+   - Chaque partie = thème majeur
+   - Sous-parties numérotées logiquement
+   - Paragraphes cohérents (150-300 mots)
+   - Citations d'experts et sources
+   - Graphiques/tableaux si pertinent
+   
+3. Analyse critique approfondie
+   - Différentes perspectives (pour/contre)
+   - Débats académiques
+   - Limites et controverses
+   - Implications pratiques
+   
+4. Synthèse et conclusion
+   - Récapitulatif des points clés
+   - Réponse à la problématique
+   - Ouvertures et perspectives futures
+   
+5. Références bibliographiques
+   - Sources académiques citées
+   - Lectures recommandées
+
+📝 STYLE RÉDACTIONNEL:
+• Vocabulaire riche et varié
+• Figures de style appropriées (métaphores, analogies)
+• Ton professionnel mais engageant
+• Éviter répétitions (synonymes, reformulations)
+• Phrases complexes bien construites
+• Connecteurs logiques (néanmoins, en effet, ainsi, etc.)
+
+🔍 APPROFONDISSEMENT:
+• Explorer TOUTES les dimensions du sujet
+• Contexte historique, social, économique, technique
+• Comparaisons internationales si pertinent
+• Études de cas détaillées
+• Statistiques et données chiffrées
+• Théories et modèles académiques
+
+💡 RÉFLEXION CRITIQUE:
+• Questionnement des idées reçues
+• Dialectique: thèse, antithèse, synthèse
+• Nuances et complexité assumées
+• Aucune simplification excessive
+• Reconnaissance des zones grises
+
+📊 FORMAT LIVRE (si demandé):
+• Table des matières détaillée
+• Chapitres numérotés (I, II, III...)
+• Sections et sous-sections (A, B, 1, 2...)
+• Encadrés pour concepts clés
+• Notes de bas de page si nécessaire
+• Glossaire des termes techniques
+• Index si très long
+
+🎯 OBJECTIF:
+Produire un document COMPLET, APPROFONDI et STRUCTURÉ qui pourrait être publié académiquement.
+Minimum 2000 mots, maximum illimité selon besoin.
+Qualité > Quantité, mais exhaustivité requise.
+
+⚠️ CRUCIAL: 
+• Ne JAMAIS résumer par manque de place - développer autant que nécessaire
+• Utiliser plusieurs réponses si une seule ne suffit pas
+• Indiquer clairement "Partie 1/X" si découpage nécessaire
 """
     }
     
@@ -1138,6 +1218,27 @@ def apply_mode_behavior(response: str, question: str, mode: str) -> str:
             if line.strip() and not line.strip().startswith(('---', '===', '###')):
                 essential.append(line)
         return "⚡ " + "\n".join(essential[:3]) + "\n\n💡 Mode détaillé disponible si besoin."
+    
+    elif mode == "doc":
+        # Mode documentation: structurer en format académique/livre
+        word_count = len(response.split())
+        
+        # Ajouter header académique
+        header = f"""📖 DOCUMENTATION APPROFONDIE
+{'='*80}
+Sujet: {question}
+Volume: ~{word_count} mots | Niveau: Académique/Professionnel
+{'='*80}
+
+"""
+        
+        # Ajouter indicateur de longueur si très long
+        if word_count > 2000:
+            footer = f"\n\n{'='*80}\n📊 Document complet: {word_count} mots\n💡 Format adapté pour publication/impression\n✅ Sources et références incluses"
+        else:
+            footer = f"\n\n{'='*80}\n📝 Document de base établi ({word_count} mots)\n💬 Demande 'Approfondir [section]' pour développer davantage"
+        
+        return header + response + footer
     
     return response
 
@@ -7848,11 +7949,12 @@ with main_container:
         with mode_col1:
             kibali_mode = st.selectbox(
                 "Mode de Kibali",
-                ["humain", "scientifique", "code_expert", "rapide"],
+                ["humain", "scientifique", "code_expert", "doc", "rapide"],
                 format_func=lambda x: {
                     "humain": "🧑 Mode Humain - Conversationnel et naturel",
                     "scientifique": "🔬 Mode Scientifique - Précis, rigoureux, calculs détaillés",
                     "code_expert": "💻 Mode Code Expert - Programmation avancée (niveau Claude)",
+                    "doc": "📖 Mode Documentation - Dissertations, livres, analyses approfondies",
                     "rapide": "⚡ Mode Rapide - Réponses concises et directes"
                 }[x],
                 key="kibali_mode_select",
@@ -7908,6 +8010,25 @@ with main_container:
             - Bullet points pour clarté
             - Pas de contexte inutile
             - Code: snippets minimaux fonctionnels
+            """,
+            "doc": """
+            📖 **Comportement**: Expert en rédaction approfondie
+            - Dissertations académiques complètes
+            - Livres et documents longs (10-30+ pages)
+            - Structure méthodique (intro, développement, conclusion)
+            - Style professionnel et accessible
+            - Références bibliographiques
+            - Analyses critiques multidimensionnelles
+            - Exemples concrets et études de cas
+            - Peut produire 2000+ mots par réponse
+            
+            **📚 Idéal pour**:
+            • Dissertations universitaires
+            • Rapports professionnels complets
+            • Manuels et guides détaillés
+            • Analyses approfondies multi-facettes
+            • Livres blancs (white papers)
+            • Thèses et mémoires (sections)
             """
         }
         
