@@ -1,0 +1,41 @@
+# Dépendances pour le Système Vocal Kibali
+# Installation: pip install -r requirements_voice.txt
+
+# === TRANSCRIPTION (Speech-to-Text) ===
+openai-whisper>=20231117
+# Alternative plus légère:
+# whisper-jax>=0.0.1
+
+# === SYNTHÈSE VOCALE (Text-to-Speech) ===
+TTS>=0.22.0
+# Coqui TTS - Synthèse vocale de qualité
+# Supporte 1100+ voix dans 99+ langues
+
+# === AUDIO I/O ===
+soundfile>=0.12.1
+sounddevice>=0.4.6
+librosa>=0.10.0
+pyaudio>=0.2.13  # Windows/Linux
+
+# === TRAITEMENT AUDIO ===
+numpy>=1.24.0
+scipy>=1.10.0
+
+# === DÉPENDANCES TTS ===
+torch>=2.0.0
+torchaudio>=2.0.0
+# Note: Utiliser CPU pour compatibilité maximale
+# Pour GPU: installer pytorch avec CUDA séparément
+
+# === UTILITAIRES ===
+pydub>=0.25.1  # Manipulation audio
+noisereduce>=3.0.0  # Réduction de bruit (optionnel)
+
+# === SYSTÈME (Ubuntu/Debian) ===
+# sudo apt-get install -y ffmpeg libsndfile1 portaudio19-dev
+
+# === NOTES ===
+# Taille totale: ~1.5GB (modèles inclus)
+# Modèles Whisper: téléchargés automatiquement au premier usage
+# Modèles TTS: téléchargés automatiquement au premier usage
+# Cache: ~/.cache/huggingface/ et ~/.cache/voice_models/

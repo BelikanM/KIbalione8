@@ -50,6 +50,8 @@ import time
 import shutil
 # AI Code Agent pour exécution autonome de code
 from ai_code_agent import AICodeAgent
+# Voice Agent pour transcription et synthèse vocale
+from voice_agent import VoiceAgent, StreamingVoiceAgent
 # Optimisation CPU - Limiter les threads torch
 torch.set_num_threads(4)  # Maximum 4 threads pour éviter surchauffe
 # Note: set_num_interop_threads retiré car cause RuntimeError si appelé après init parallèle
@@ -7883,6 +7885,69 @@ with st.sidebar:
     train_submodel_btn = st.button("🧠 Entraîner sous-modèle (sklearn)", key="train_submodel")
     improve_db_btn = st.button("📚 Améliorer DB (fouille internet)", key="improve_db")
   
+    # 🎤 SECTION VOCALE
+    st.markdown("---")
+    st.markdown("#### 🎤 Interface Vocale")
+    
+    voice_enable_checkbox = st.checkbox(
+        "Activer le mode vocal",
+        value=st.session_state.get("voice_enabled", False),
+        key="voice_enable_checkbox",
+        help="Active la transcription et synthèse vocale"
+    )
+    
+    if voice_enable_checkbox != st.session_state.get("voice_enabled", False):
+        st.session_state.voice_enabled = voice_enable_checkbox
+        if voice_enable_checkbox and st.session_state.voice_agent is None:
+            with st.spinner("🎤 Chargement des modèles vocaux..."):
+                try:
+                    st.session_state.voice_agent = StreamingVoiceAgent(
+                        whisper_model="base",  # ~150MB
+                        tts_model="tts_models/fr/mai/tacotron2-DDC"
+                    )
+                    # Charger les modèles
+                    success = st.session_state.voice_agent.load_models(
+                        load_whisper=True,
+                        load_tts=True
+                    )
+                    if success:
+                        st.session_state.voice_models_loaded = True
+                        st.success("✅ Modèles vocaux chargés!")
+                    else:
+                        st.error("❌ Erreur chargement modèles vocaux")
+                        st.info("💡 Lancez: python install_voice_models.py")
+                except Exception as e:
+                    st.error(f"❌ Erreur: {e}")
+                    st.info("💡 Installez les modèles: python install_voice_models.py")
+    
+    # Afficher le statut vocal
+    if st.session_state.get("voice_enabled", False):
+        if st.session_state.get("voice_models_loaded", False):
+            st.success("🎤 Mode vocal actif")
+            
+            # Options avancées
+            with st.expander("⚙️ Options vocales"):
+                voice_record_duration = st.slider(
+                    "Durée d'enregistrement (s)",
+                    min_value=3,
+                    max_value=30,
+                    value=5,
+                    key="voice_duration"
+                )
+                voice_auto_play = st.checkbox(
+                    "Lecture automatique des réponses",
+                    value=True,
+                    key="voice_autoplay"
+                )
+                voice_language = st.selectbox(
+                    "Langue de transcription",
+                    options=["fr", "en", "es", "de"],
+                    index=0,
+                    key="voice_lang"
+                )
+        else:
+            st.warning("⏳ Modèles vocaux non chargés")
+    
     st.markdown("---")
     status_display = st.text_area("📊 Statut", value=st.session_state.status_msg, height=100, key='status_sidebar')
     cache_stats = st.text_area("📈 Cache", value=st.session_state.cache_msg, height=50, key='cache_sidebar')
@@ -7902,6 +7967,11 @@ with st.sidebar:
     if "code_agent" not in st.session_state:
         # Initialiser l'AI Code Agent
         st.session_state.code_agent = AICodeAgent()
+    if "voice_agent" not in st.session_state:
+        # Initialiser le Voice Agent (streaming pour fluidité)
+        st.session_state.voice_agent = None  # Chargement lazy au premier usage
+        st.session_state.voice_enabled = False
+        st.session_state.voice_models_loaded = False
     if pdf_upload:
         files = upload_pdfs(pdf_upload)
         st.session_state.status_msg = f"✅ {len(files)} PDFs uploadés" if files else "⚠️ Aucun PDF"
@@ -8324,6 +8394,117 @@ with main_container:
                     st.markdown(f"**Question:** {highlight_important_words(msg['content'])}", unsafe_allow_html=True)
                 else:
                     st.markdown(highlight_important_words(msg['content']), unsafe_allow_html=True)
+        
+        # 🎤 INTERFACE VOCALE - Boutons d'enregistrement
+        if st.session_state.get("voice_enabled", False) and st.session_state.get("voice_models_loaded", False):
+            st.markdown("---")
+            col_voice1, col_voice2, col_voice3 = st.columns([1, 1, 1])
+            
+            with col_voice1:
+                if st.button("🎤 Enregistrer Question", key="voice_record_btn", use_container_width=True):
+                    st.session_state.voice_recording = True
+            
+            with col_voice2:
+                if st.button("🔊 Répéter Dernière Réponse", key="voice_repeat_btn", use_container_width=True):
+                    if st.session_state.chat_history:
+                        last_response = st.session_state.chat_history[-1]
+                        if last_response["role"] == "assistant":
+                            with st.spinner("🔊 Synthèse vocale..."):
+                                voice_agent = st.session_state.voice_agent
+                                audio_path = voice_agent.synthesize_speech(
+                                    last_response["content"],
+                                    play=st.session_state.get("voice_autoplay", True)
+                                )
+                                if audio_path:
+                                    st.success("✅ Audio généré!")
+                                    # Téléchargement optionnel
+                                    with open(audio_path, 'rb') as f:
+                                        st.download_button(
+                                            "💾 Télécharger Audio",
+                                            f.read(),
+                                            file_name="kibali_response.wav",
+                                            mime="audio/wav"
+                                        )
+            
+            with col_voice3:
+                voice_status = "🟢 Actif" if st.session_state.get("voice_models_loaded", False) else "🔴 Inactif"
+                st.info(f"Vocal: {voice_status}")
+            
+            # Gestion de l'enregistrement vocal
+            if st.session_state.get("voice_recording", False):
+                st.info(f"🎤 Parlez maintenant ({st.session_state.get('voice_duration', 5)}s)...")
+                
+                voice_agent = st.session_state.voice_agent
+                duration = st.session_state.get('voice_duration', 5)
+                language = st.session_state.get('voice_lang', 'fr')
+                
+                # Enregistrer audio
+                audio = voice_agent.record_audio(duration=duration)
+                
+                if len(audio) > 0:
+                    with st.spinner("📝 Transcription en cours..."):
+                        # Transcrire
+                        transcription = voice_agent.transcribe_audio(
+                            audio_array=audio,
+                            language=language
+                        )
+                        
+                        if transcription:
+                            st.success(f"✅ Transcription: {transcription}")
+                            
+                            # Utiliser la transcription comme prompt
+                            prompt = transcription
+                            st.session_state.voice_recording = False
+                            
+                            # Traiter la question vocale
+                            with st.chat_message("user", avatar="☁️"):
+                                st.markdown(f"**Question (vocale):** {highlight_important_words(prompt)}", unsafe_allow_html=True)
+                            
+                            with st.chat_message("assistant", avatar="⭐"):
+                                with st.spinner("🤖 Kibali réfléchit..."):
+                                    # Générer réponse
+                                    mode_prompt = get_mode_specific_prompt(kibali_mode)
+                                    response = handle_chat_enhanced(
+                                        prompt, 
+                                        st.session_state.chat_history, 
+                                        st.session_state.agent,
+                                        list(WORKING_MODELS.keys())[0],
+                                        st.session_state.vectordb,
+                                        st.session_state.graph,
+                                        st.session_state.pois,
+                                        web_search_toggle,
+                                        mode=kibali_mode,
+                                        mode_prompt=mode_prompt
+                                    )
+                                    
+                                    response = apply_mode_behavior(response, prompt, kibali_mode)
+                                    st.markdown(highlight_important_words(response), unsafe_allow_html=True)
+                                    
+                                    # Synthèse vocale de la réponse
+                                    if st.session_state.get("voice_autoplay", True):
+                                        with st.spinner("🔊 Synthèse vocale..."):
+                                            audio_path = voice_agent.synthesize_speech(
+                                                response,
+                                                play=True
+                                            )
+                                            if audio_path:
+                                                st.success("✅ Réponse vocale jouée!")
+                                    
+                                    # Sauvegarder dans l'historique
+                                    st.session_state.chat_history.append({"role": "user", "content": prompt})
+                                    st.session_state.chat_history.append({"role": "assistant", "content": response})
+                                    
+                                    # Sauvegarder conversation
+                                    save_conversation_auto(st.session_state.chat_history)
+                        else:
+                            st.error("❌ Erreur de transcription")
+                            st.session_state.voice_recording = False
+                else:
+                    st.error("❌ Erreur d'enregistrement")
+                    st.session_state.voice_recording = False
+            
+            st.markdown("---")
+        
         if prompt := st.chat_input("Pose une question...", key="chat_input"):
             with st.chat_message("user", avatar="☁️"):
                 highlighted_prompt = highlight_important_words(prompt)
