@@ -48,6 +48,8 @@ import speech_recognition as sr
 from ultralytics import YOLO
 import time
 import shutil
+# AI Code Agent pour exécution autonome de code
+from ai_code_agent import AICodeAgent
 # Optimisation CPU - Limiter les threads torch
 torch.set_num_threads(4)  # Maximum 4 threads pour éviter surchauffe
 # Note: set_num_interop_threads retiré car cause RuntimeError si appelé après init parallèle
@@ -1183,6 +1185,177 @@ Qualité > Quantité, mais exhaustivité requise.
     
     return prompts.get(mode, prompts["humain"])
 
+def generate_pdf_from_text(text: str, title: str, output_path: str) -> bool:
+    """Génère un PDF formaté à partir d'un texte long (mode doc)"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import cm
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
+        from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER, TA_LEFT
+        from datetime import datetime
+        
+        # Créer le document
+        doc = SimpleDocTemplate(
+            output_path,
+            pagesize=A4,
+            rightMargin=2*cm,
+            leftMargin=2*cm,
+            topMargin=2.5*cm,
+            bottomMargin=2*cm
+        )
+        
+        # Styles
+        styles = getSampleStyleSheet()
+        
+        # Style titre
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            textColor=colors.HexColor('#1a1a1a'),
+            spaceAfter=20,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        
+        # Style sous-titre
+        subtitle_style = ParagraphStyle(
+            'Subtitle',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor('#2c3e50'),
+            spaceAfter=12,
+            fontName='Helvetica-Bold'
+        )
+        
+        # Style section
+        section_style = ParagraphStyle(
+            'Section',
+            parent=styles['Heading3'],
+            fontSize=12,
+            textColor=colors.HexColor('#34495e'),
+            spaceAfter=10,
+            fontName='Helvetica-Bold'
+        )
+        
+        # Style corps de texte
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['BodyText'],
+            fontSize=11,
+            alignment=TA_JUSTIFY,
+            spaceAfter=12,
+            leading=16,
+            fontName='Helvetica'
+        )
+        
+        # Style métadonnées
+        meta_style = ParagraphStyle(
+            'Meta',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.grey,
+            alignment=TA_CENTER,
+            spaceAfter=8
+        )
+        
+        # Construction du document
+        story = []
+        
+        # Page de titre
+        story.append(Spacer(1, 3*cm))
+        story.append(Paragraph(title, title_style))
+        story.append(Spacer(1, 0.5*cm))
+        
+        # Métadonnées
+        date_str = datetime.now().strftime("%d/%m/%Y à %H:%M")
+        story.append(Paragraph(f"Généré par Kibali (Mode Documentation)", meta_style))
+        story.append(Paragraph(f"Date: {date_str}", meta_style))
+        story.append(Spacer(1, 1*cm))
+        
+        # Ligne de séparation
+        line_data = [['_' * 80]]
+        line_table = Table(line_data, colWidths=[16*cm])
+        line_table.setStyle(TableStyle([
+            ('TEXTCOLOR', (0,0), (-1,-1), colors.grey),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ]))
+        story.append(line_table)
+        story.append(Spacer(1, 1*cm))
+        
+        # Parser le contenu
+        lines = text.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            
+            if not line:
+                story.append(Spacer(1, 0.3*cm))
+                continue
+            
+            # Détection des niveaux de titres
+            if line.startswith('# '):
+                # Titre principal (H1)
+                text_clean = line[2:].strip()
+                story.append(PageBreak())
+                story.append(Paragraph(text_clean, title_style))
+            elif line.startswith('## '):
+                # Sous-titre (H2)
+                text_clean = line[3:].strip()
+                story.append(Spacer(1, 0.5*cm))
+                story.append(Paragraph(text_clean, subtitle_style))
+            elif line.startswith('### '):
+                # Section (H3)
+                text_clean = line[4:].strip()
+                story.append(Paragraph(text_clean, section_style))
+            elif line.startswith('**') and line.endswith('**'):
+                # Texte en gras
+                text_clean = line.replace('**', '')
+                story.append(Paragraph(f"<b>{text_clean}</b>", body_style))
+            elif line.startswith('- ') or line.startswith('• '):
+                # Liste à puces
+                text_clean = line[2:].strip()
+                story.append(Paragraph(f"• {text_clean}", body_style))
+            elif line.startswith(('1. ', '2. ', '3. ', '4. ', '5. ')):
+                # Liste numérotée
+                story.append(Paragraph(line, body_style))
+            elif line.startswith('> '):
+                # Citation
+                text_clean = line[2:].strip()
+                quote_style = ParagraphStyle(
+                    'Quote',
+                    parent=body_style,
+                    leftIndent=1*cm,
+                    italic=True,
+                    textColor=colors.HexColor('#555555')
+                )
+                story.append(Paragraph(f'<i>"{text_clean}"</i>', quote_style))
+            else:
+                # Texte normal
+                # Échapper les caractères spéciaux XML
+                text_clean = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                story.append(Paragraph(text_clean, body_style))
+        
+        # Pied de page final
+        story.append(Spacer(1, 2*cm))
+        story.append(line_table)
+        story.append(Spacer(1, 0.5*cm))
+        word_count = len(text.split())
+        story.append(Paragraph(
+            f"Document de {word_count} mots | Généré par Kibali en Mode Documentation",
+            meta_style
+        ))
+        
+        # Générer le PDF
+        doc.build(story)
+        return True
+        
+    except Exception as e:
+        print(f"❌ Erreur génération PDF: {e}")
+        return False
+
 def apply_mode_behavior(response: str, question: str, mode: str) -> str:
     """Applique le comportement du mode sélectionné à la réponse"""
     
@@ -1232,8 +1405,42 @@ Volume: ~{word_count} mots | Niveau: Académique/Professionnel
 
 """
         
-        # Ajouter indicateur de longueur si très long
-        if word_count > 2000:
+        # Si très long (>1500 mots), générer un PDF automatiquement
+        if word_count > 1500:
+            import os
+            import time
+            from datetime import datetime
+            
+            # Créer le dossier pour les PDFs générés
+            pdf_dir = os.path.join(GENERATED_PATH, "documents")
+            os.makedirs(pdf_dir, exist_ok=True)
+            
+            # Nom de fichier sécurisé
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_title = "".join(c for c in question[:50] if c.isalnum() or c in (' ', '-', '_')).strip()
+            safe_title = safe_title.replace(' ', '_')
+            pdf_filename = f"doc_{safe_title}_{timestamp}.pdf"
+            pdf_path = os.path.join(pdf_dir, pdf_filename)
+            
+            # Générer le PDF
+            pdf_success = generate_pdf_from_text(response, question, pdf_path)
+            
+            if pdf_success:
+                # Stocker le chemin dans session_state pour le téléchargement
+                if 'generated_pdfs' not in st.session_state:
+                    st.session_state.generated_pdfs = []
+                st.session_state.generated_pdfs.append({
+                    'path': pdf_path,
+                    'filename': pdf_filename,
+                    'title': question,
+                    'word_count': word_count,
+                    'timestamp': timestamp
+                })
+                
+                footer = f"\n\n{'='*80}\n📊 Document complet: {word_count} mots\n📄 **PDF généré automatiquement!**\n💾 Fichier: `{pdf_filename}`\n📥 Bouton de téléchargement disponible ci-dessous\n✅ Sources et références incluses"
+            else:
+                footer = f"\n\n{'='*80}\n📊 Document complet: {word_count} mots\n⚠️ Génération PDF échouée - document affiché en texte\n💡 Format adapté pour publication/impression\n✅ Sources et références incluses"
+        elif word_count > 2000:
             footer = f"\n\n{'='*80}\n📊 Document complet: {word_count} mots\n💡 Format adapté pour publication/impression\n✅ Sources et références incluses"
         else:
             footer = f"\n\n{'='*80}\n📝 Document de base établi ({word_count} mots)\n💬 Demande 'Approfondir [section]' pour développer davantage"
@@ -6959,6 +7166,62 @@ def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph,
     if not message.strip():
         return ""
     
+    # 🤖 DÉTECTION D'ACTION AUTOMATIQUE (AI Code Agent)
+    # Permet à Kibali d'exécuter du code pour accomplir des tâches
+    if 'code_agent' in st.session_state:
+        action_intent = st.session_state.code_agent.detect_action_intent(message)
+        
+        if action_intent['is_action']:
+            # Kibali va générer et exécuter du code !
+            with st.status(f"🤖 Exécution autonome : {action_intent['action_type']}...", expanded=True) as status:
+                st.write(f"📋 Intention détectée: {action_intent['action_type']}")
+                st.write(f"📂 Fichiers cibles: {', '.join(action_intent['target_files'])}")
+                st.write(f"⚙️ Paramètres: {action_intent['parameters']}")
+                
+                # Générer le code
+                st.write("💻 Génération du code Python...")
+                code = st.session_state.code_agent.generate_code(action_intent)
+                
+                with st.expander("📝 Code généré", expanded=False):
+                    st.code(code, language='python')
+                
+                # Exécuter le code
+                st.write("⚡ Exécution du code...")
+                success, stdout, stderr = st.session_state.code_agent.execute_code(code)
+                
+                if success:
+                    status.update(label="✅ Exécution réussie !", state="complete")
+                    
+                    response = f"""🤖 **ACTION EXÉCUTÉE AVEC SUCCÈS**
+
+📋 **Tâche**: {action_intent['action_type']} sur {', '.join(action_intent['target_files'])}
+
+📊 **Résultats**:
+```
+{stdout}
+```
+
+💻 **Code utilisé**: Voir l'expander ci-dessus
+
+✅ **Statut**: Terminé sans erreur
+"""
+                    return response
+                else:
+                    status.update(label="❌ Erreur d'exécution", state="error")
+                    
+                    response = f"""❌ **ERREUR D'EXÉCUTION**
+
+📋 **Tâche tentée**: {action_intent['action_type']}
+
+⚠️ **Erreur**:
+```
+{stderr}
+```
+
+💡 **Suggestion**: Vérifiez que le fichier existe et est accessible.
+"""
+                    return response
+    
     # MODE HUMAIN: Analyser la question avant de répondre
     if mode == "humain":
         intent = analyze_question_intent(message)
@@ -7636,6 +7899,9 @@ with st.sidebar:
         st.session_state.current_model = WORKING_MODELS[list(WORKING_MODELS.keys())[0]]
     if "agent" not in st.session_state:
         st.session_state.agent = None
+    if "code_agent" not in st.session_state:
+        # Initialiser l'AI Code Agent
+        st.session_state.code_agent = AICodeAgent()
     if pdf_upload:
         files = upload_pdfs(pdf_upload)
         st.session_state.status_msg = f"✅ {len(files)} PDFs uploadés" if files else "⚠️ Aucun PDF"
@@ -8090,6 +8356,26 @@ with main_container:
                         response = apply_mode_behavior(response, prompt, kibali_mode)
                         st.markdown(highlight_important_words(response), unsafe_allow_html=True)
                         content_to_save = response
+                        
+                        # Si mode doc et PDF généré, afficher bouton de téléchargement
+                        if kibali_mode == "doc" and 'generated_pdfs' in st.session_state and st.session_state.generated_pdfs:
+                            latest_pdf = st.session_state.generated_pdfs[-1]
+                            st.success(f"📄 PDF généré: {latest_pdf['filename']}")
+                            
+                            # Lire le fichier PDF
+                            with open(latest_pdf['path'], 'rb') as pdf_file:
+                                pdf_bytes = pdf_file.read()
+                            
+                            # Bouton de téléchargement
+                            st.download_button(
+                                label="📥 Télécharger le PDF",
+                                data=pdf_bytes,
+                                file_name=latest_pdf['filename'],
+                                mime="application/pdf",
+                                key=f"download_pdf_{latest_pdf['timestamp']}"
+                            )
+                            
+                            st.info(f"📊 {latest_pdf['word_count']} mots | Format: A4 | Police: Helvetica")
             
             st.session_state.chat_history.append({"role": "user", "content": prompt})
             st.session_state.chat_history.append({"role": "assistant", "content": content_to_save})
