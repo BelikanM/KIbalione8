@@ -3874,8 +3874,12 @@ if uploaded_pdfs and st.button("Indexer les PDFs dans la base vectorielle"):
             embeddings = SentenceTransformerEmbeddings('sentence-transformers/all-MiniLM-L6-v2', device=device)
           
             st.session_state.vectorstore = FAISS.from_documents(splits, embeddings)
+            # Synchroniser avec vectordb pour que l'agent Kibali ait accès
+            if "vectordb" not in st.session_state:
+                st.session_state.vectordb = None
+            st.session_state.vectordb = st.session_state.vectorstore
       
-            st.success("Base vectorielle créée avec succès !")
+            st.success("Base vectorielle créée avec succès ! Kibali peut maintenant accéder à ces documents.")
 # Section for binary file upload
 uploaded_file = st.file_uploader("Choisir un fichier binaire", type=["bin","dat","raw","bin","safetensors","pt","ckpt"])
 if uploaded_file:
@@ -5659,12 +5663,12 @@ def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None)
         # Outils de base RAG et recherche
         Tool(
             name="Local_Knowledge_Base",
-            func=lambda q: "\n\n".join([d.page_content for d in rag_search(q, vectordb, k=3)]),
+            func=lambda q: search_vectorstore(q) if hasattr(st.session_state, 'vectorstore') and st.session_state.vectorstore else "❌ Base vectorielle non disponible. Indexez des PDFs d'abord.",
             description="Recherche dans la base de connaissances locale (PDFs et documents internes). Utilise ceci en PREMIER pour les questions sur des documents spécifiques."
         ),
         Tool(
             name="Chat_History_Search", # AJOUT MÉMOIRE VECTORIELLE: Nouvel outil pour historique
-            func=lambda q: "\n\n".join([d.page_content for d in chat_rag_search(q, chat_vectordb, k=3)]),
+            func=lambda q: "\n\n".join([d.page_content for d in chat_rag_search(q, chat_vectordb, k=3)]) if chat_vectordb else "❌ Historique chat non disponible",
             description="Recherche dans l'historique des conversations passées pour maintenir la continuité. Utilise pour les questions de suites de discussion."
         ),
         Tool(
@@ -5679,7 +5683,7 @@ def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None)
         ),
         Tool(
             name="Hybrid_Search",
-            func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=3, web_search_enabled=True, chat_vectordb=chat_vectordb)]),
+            func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=3, web_search_enabled=True, chat_vectordb=chat_vectordb)]) if vectordb else search_vectorstore(q) if hasattr(st.session_state, 'vectorstore') and st.session_state.vectorstore else "❌ Base non disponible",
             description="Recherche hybride combinant base locale, historique chat ET web. Idéal pour des questions nécessitant à la fois des données internes, passées et externes."
         ),
         Tool(
