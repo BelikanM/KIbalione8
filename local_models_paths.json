@@ -1,0 +1,7 @@
+{
+  "DeepSeek V3 (Puissant)": "/root/RAG_ChatBot/local_models/DeepSeek_V3_Puissant",
+  "Gemma 2B (Rapide)": "/root/RAG_ChatBot/local_models/Gemma_2B_Rapide",
+  "Llama 3.1 8B (Équilibré)": "/root/RAG_ChatBot/local_models/Llama_3.1_8B_Équilibré",
+  "Qwen 2.5 7B (Polyvalent)": "/root/RAG_ChatBot/local_models/Qwen_2.5_7B_Polyvalent",
+  "SmolLM 3B (Léger)": "/root/RAG_ChatBot/local_models/SmolLM_3B_Léger"
+}

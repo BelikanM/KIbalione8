@@ -1,5 +1,5 @@
 import math
-import fitz  # pymupdf
+import fitz # pymupdf
 import osmium
 import networkx as nx
 import streamlit as st
@@ -24,7 +24,9 @@ from sklearn.cluster import KMeans
 import torch
 from torchvision import models, transforms
 from langchain_huggingface import HuggingFaceEndpoint
-from langchain.agents import initialize_agent
+from langchain_classic.agents import AgentExecutor
+from langchain_classic.agents.react.agent import create_react_agent
+from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import Tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
@@ -46,15 +48,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from sklearn.naive_bayes import MultinomialNB
 import re
-
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from langchain_huggingface import HuggingFacePipeline
 # ===============================================
 # Configuration - CHEMINS UNIFIÉS
 # ===============================================
 # Définir dynamiquement les chemins basés sur le répertoire du projet corrigé
-PROJECT_DIR = os.path.expanduser('~/RAG_ChatBot')  # Chemin corrigé vers le dossier contenant les données et poids
+PROJECT_DIR = os.path.expanduser('~/RAG_ChatBot') # Chemin corrigé vers le dossier contenant les données et poids
 CHATBOT_DIR = PROJECT_DIR
 VECTORDB_PATH = os.path.join(CHATBOT_DIR, "vectordb")
-CHAT_VECTORDB_PATH = os.path.join(CHATBOT_DIR, "chat_vectordb")  # AJOUT MÉMOIRE VECTORIELLE: Base dédiée pour l'historique chat
+CHAT_VECTORDB_PATH = os.path.join(CHATBOT_DIR, "chat_vectordb") # AJOUT MÉMOIRE VECTORIELLE: Base dédiée pour l'historique chat
 PDFS_PATH = os.path.join(CHATBOT_DIR, "pdfs")
 GRAPHS_PATH = os.path.join(CHATBOT_DIR, "graphs")
 MAPS_PATH = os.path.join(CHATBOT_DIR, "maps")
@@ -62,8 +65,8 @@ METADATA_PATH = os.path.join(CHATBOT_DIR, "metadata.json")
 TRAJECTORIES_PATH = os.path.join(CHATBOT_DIR, "trajectories.json")
 WEB_CACHE_PATH = os.path.join(CHATBOT_DIR, "web_cache.json")
 GENERATED_PATH = os.path.join(CHATBOT_DIR, "generated")
-SUBMODELS_PATH = os.path.join(CHATBOT_DIR, "submodels")  # Nouveau: Chemin pour les sous-modèles sklearn
-
+SUBMODELS_PATH = os.path.join(CHATBOT_DIR, "submodels") # Nouveau: Chemin pour les sous-modèles sklearn
+MODEL_PATH = os.path.expanduser("~/.cache/huggingface/hub/models--deepseek-ai--DeepSeek-V3-0324/snapshots/e9b33add76883f293d6bf61f6bd89b497e80e335")
 # Modèles qui fonctionnent
 WORKING_MODELS = {
     "DeepSeek V3 (Puissant)": "deepseek-ai/DeepSeek-V3-0324",
@@ -72,7 +75,6 @@ WORKING_MODELS = {
     "Qwen 2.5 7B (Polyvalent)": "Qwen/Qwen2.5-7B-Instruct",
     "SmolLM 3B (Léger)": "HuggingFaceTB/SmolLM3-3B",
 }
-
 # ===============================================
 # Configuration HuggingFace Token depuis .env
 # ===============================================
@@ -84,20 +86,17 @@ if os.path.exists(env_path):
 else:
     st.write(f"⚠️ Aucun fichier .env trouvé à {env_path}")
     st.write("Créez un fichier .env dans ~/RAG_ChatBot avec: HF_TOKEN=hf_votre_token")
-
 HF_TOKEN = os.getenv("HF_TOKEN")
 if not HF_TOKEN:
     raise ValueError("❌ HF_TOKEN non trouvé ! Vérifiez votre fichier .env")
 else:
     st.write(f"🔑 Token HF configuré: {HF_TOKEN[:10]}...")
-
 # Définir la variable d'environnement pour huggingface_hub
 os.environ["HF_TOKEN"] = HF_TOKEN
 os.environ["HUGGINGFACE_HUB_TOKEN"] = HF_TOKEN
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 if not TAVILY_API_KEY:
     raise ValueError("❌ TAVILY_API_KEY non trouvé ! Vérifiez votre fichier .env")
-
 # ===============================================
 # Test de connexion HuggingFace
 # ===============================================
@@ -111,11 +110,9 @@ def test_hf_connection():
     except Exception as e:
         st.write(f"❌ Erreur connexion HuggingFace: {e}")
         return False
-
 # Tester la connexion au démarrage
 if not test_hf_connection():
     st.write("⚠️ Problème de connexion HuggingFace, vérifiez votre token")
-
 # ===============================================
 # Fonctions utilitaires
 # ===============================================
@@ -127,11 +124,10 @@ def setup_drive():
     os.makedirs(GRAPHS_PATH, exist_ok=True)
     os.makedirs(MAPS_PATH, exist_ok=True)
     os.makedirs(GENERATED_PATH, exist_ok=True)
-    os.makedirs(os.path.dirname(CHAT_VECTORDB_PATH), exist_ok=True)  # AJOUT MÉMOIRE VECTORIELLE: Dossier pour chat_vectordb
-    os.makedirs(SUBMODELS_PATH, exist_ok=True)  # Nouveau: Dossier pour sous-modèles
+    os.makedirs(os.path.dirname(CHAT_VECTORDB_PATH), exist_ok=True) # AJOUT MÉMOIRE VECTORIELLE: Dossier pour chat_vectordb
+    os.makedirs(SUBMODELS_PATH, exist_ok=True) # Nouveau: Dossier pour sous-modèles
     st.write(f"📁 Dossier principal : {CHATBOT_DIR}")
     return True
-
 def extract_text_from_pdf(pdf_path):
     """Extraire le texte d'un PDF"""
     text = ""
@@ -144,7 +140,6 @@ def extract_text_from_pdf(pdf_path):
     except Exception as e:
         st.write(f"❌ Erreur PDF {pdf_path}: {e}")
         return ""
-
 def upload_and_process_pbf(pbf_file):
     """Traitement du fichier PBF uploadé"""
     if pbf_file is None:
@@ -170,7 +165,6 @@ def upload_and_process_pbf(pbf_file):
     st.write(f"✅ POIs: {len(pois)} points")
     st.write(f"💾 Sauvegardé: {graph_path}")
     return G, pois, f"✅ Graphe créé: {len(G)} nœuds, {len(pois)} POIs"
-
 def load_existing_graph():
     """Charge un graphe existant"""
     graph_files = [f for f in os.listdir(GRAPHS_PATH) if f.endswith('_graph.graphml')] if os.path.exists(GRAPHS_PATH) else []
@@ -188,7 +182,6 @@ def load_existing_graph():
         return G, pois, f"✅ Graphe chargé: {len(G)} nœuds, {len(pois)} POIs"
     except Exception as e:
         return None, None, f"❌ Erreur: {e}"
-
 @st.cache_resource
 def get_embedding_model():
     """Modèle d'embedding en cache pour éviter rechargement"""
@@ -197,7 +190,6 @@ def get_embedding_model():
         model_name="sentence-transformers/all-MiniLM-L6-v2",
         model_kwargs={'device': device}
     )
-
 # AJOUT MÉMOIRE VECTORIELLE: Fonctions pour la mémoire chat
 def load_chat_vectordb():
     """Charger la base vectorielle pour l'historique chat"""
@@ -209,12 +201,11 @@ def load_chat_vectordb():
         return chat_vectordb, "✅ Base chat chargée"
     except Exception as e:
         return None, f"❌ Erreur chat: {e}"
-
 def add_to_chat_db(user_msg, ai_msg, chat_vectordb):
     """Ajouter un échange user-AI à la base chat"""
     if chat_vectordb is None:
         embedding_model = get_embedding_model()
-        chat_vectordb = FAISS.from_texts([""], embedding_model)  # Créer si vide
+        chat_vectordb = FAISS.from_texts([""], embedding_model) # Créer si vide
     exchange = f"User: {user_msg} ||| Assistant: {ai_msg}"
     doc = Document(
         page_content=exchange,
@@ -223,7 +214,6 @@ def add_to_chat_db(user_msg, ai_msg, chat_vectordb):
     chat_vectordb.add_documents([doc])
     chat_vectordb.save_local(CHAT_VECTORDB_PATH)
     return chat_vectordb
-
 def chat_rag_search(question, chat_vectordb, k=3):
     """Rechercher dans l'historique chat pour contexte"""
     if not chat_vectordb:
@@ -233,7 +223,6 @@ def chat_rag_search(question, chat_vectordb, k=3):
     except Exception as e:
         st.write(f"❌ Erreur recherche chat: {e}")
         return []
-
 def process_pdfs():
     """Traiter les PDFs"""
     st.write("📄 Traitement des PDFs...")
@@ -261,12 +250,12 @@ def process_pdfs():
     pdf_files = [f for f in os.listdir(PDFS_PATH) if f.endswith('.pdf')] if os.path.exists(PDFS_PATH) else []
     if not pdf_files:
         return vectordb, "⚠️ Aucun PDF trouvé"
-    
+   
     # Check préliminaire : si aucun nouveau, skip
     new_pdfs = [f for f in pdf_files if f not in processed_filenames]
     if not new_pdfs:
         return vectordb, "✅ Tous les PDFs déjà traités. Base à jour !"
-    
+   
     progress_bar = st.progress(0)
     status_text = st.empty()
     new_chunks_count = 0
@@ -337,7 +326,6 @@ Distance: {traj.get('distance', 0)/1000:.2f} km"""
     progress_bar.progress(1)
     status_text.text("Terminé !")
     return vectordb, f"✅ Base mise à jour : {len(new_processed)} nouveaux PDFs traités, {new_chunks_count} nouveaux chunks (total : {metadata['total_chunks']})"
-
 def load_vectordb():
     """Charger la base vectorielle"""
     if not os.path.exists(VECTORDB_PATH):
@@ -348,7 +336,6 @@ def load_vectordb():
         return vectordb, "✅ Base chargée"
     except Exception as e:
         return None, f"❌ Erreur: {e}"
-
 def save_trajectory(question, response, trajectory_info):
     """Sauvegarde un trajet"""
     trajectories = []
@@ -365,7 +352,6 @@ def save_trajectory(question, response, trajectory_info):
     trajectories.append(new_trajectory)
     with open(TRAJECTORIES_PATH, 'w', encoding='utf-8') as f:
         json.dump(trajectories, f, indent=2, ensure_ascii=False)
-
 def upload_pdfs(uploaded_files):
     """Upload des PDFs"""
     if uploaded_files is None:
@@ -378,7 +364,6 @@ def upload_pdfs(uploaded_files):
             f.write(file.getvalue())
         saved_files.append(filename)
     return saved_files
-
 # ===============================================
 # Système de Cache Web Intelligent
 # ===============================================
@@ -391,7 +376,6 @@ def load_web_cache():
         except:
             pass
     return {}
-
 def save_web_cache(cache):
     """Sauvegarde le cache web"""
     try:
@@ -399,16 +383,13 @@ def save_web_cache(cache):
             json.dump(cache, f, indent=2, ensure_ascii=False)
     except Exception as e:
         st.write(f"Erreur sauvegarde cache: {e}")
-
 def get_cache_key(query, source="text"):
     """Génère une clé de cache pour une requête"""
     return f"{source}:{query.lower().strip()}"
-
 def is_cache_expired(cache_entry, max_age_hours=24):
     """Vérifie si l'entrée du cache a expiré"""
     current_time = time.time()
     return (current_time - cache_entry.get('timestamp', 0)) > (max_age_hours * 3600)
-
 def get_cache_stats():
     """Obtient les statistiques du cache"""
     try:
@@ -421,10 +402,52 @@ def get_cache_stats():
         return f"📊 Cache: {total_entries} entrées total, {valid_count} valides, {expired_count} expirées"
     except Exception as e:
         return f"❌ Erreur stats: {e}"
-
 # ===============================================
 # Fonctions RAG et Web Search Améliorées
 # ===============================================
+class LocalClient:
+    def __init__(self):
+        from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
+        
+        MODEL_PATH = "/root/.cache/huggingface/hub/models--deepseek-ai--DeepSeek-V3-0324/snapshots/e9b33add76883f293d6bf61f6bd89b497e80e335"
+        
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True, local_files_only=True)
+        
+        # Load model with device_map for large models
+        self.model = AutoModelForCausalLM.from_pretrained(
+            MODEL_PATH, 
+            trust_remote_code=True, 
+            local_files_only=True,
+            device_map="auto",
+            torch_dtype="auto"
+        )
+        
+        self.model.eval()
+
+    def chat_completion(self, messages, model, max_tokens, temperature, stream=False):
+        try:
+            # Use chat template for proper formatting
+            prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            inputs = self.tokenizer.encode(prompt, return_tensors="pt").to(self.model.device)
+            outputs = self.model.generate(inputs, max_new_tokens=max_tokens, temperature=temperature, do_sample=temperature > 0, pad_token_id=self.tokenizer.eos_token_id)
+            generated_ids = outputs[0][inputs.shape[-1]:]
+            response = self.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+            class Choice:
+                def __init__(self, content):
+                    self.message = type('msg', (), {'content': content})()
+            class Resp:
+                def __init__(self, choice):
+                    self.choices = [choice]
+            return Resp(Choice(response))
+        except Exception as e:
+            class Choice:
+                def __init__(self, content):
+                    self.message = type('msg', (), {'content': content})()
+            class Resp:
+                def __init__(self, choice):
+                    self.choices = [choice]
+            return Resp(Choice(f"Erreur locale: {str(e)}"))
 @st.cache_resource
 def create_client():
     """Créer le client Inference avec gestion d'erreurs améliorée"""
@@ -432,9 +455,8 @@ def create_client():
         client = InferenceClient(token=HF_TOKEN)
         return client
     except Exception as e:
-        st.write(f"❌ Erreur création client: {e}")
-        raise e
-
+        st.write(f"❌ Erreur création client: {e}. Passage en mode local.")
+        return LocalClient()
 def rag_search(question, vectordb, k=3):
     """Rechercher dans la base vectorielle"""
     if not vectordb:
@@ -444,7 +466,6 @@ def rag_search(question, vectordb, k=3):
     except Exception as e:
         st.write(f"❌ Erreur recherche: {e}")
         return []
-
 def enhanced_web_search(query, max_results=5, search_type="text", use_cache=True):
     """
     Recherche web avancée avec cache intelligent et multiple sources
@@ -523,7 +544,6 @@ def enhanced_web_search(query, max_results=5, search_type="text", use_cache=True
         st.write(f"❌ Erreur recherche web globale: {e}")
         results = [{'title': 'Erreur de recherche', 'body': f'Erreur: {e}', 'source_type': 'error'}]
     return results
-
 def smart_content_extraction(url, max_length=1000):
     """
     Extraction intelligente du contenu d'une page web
@@ -550,12 +570,11 @@ def smart_content_extraction(url, max_length=1000):
         else:
             text = soup.get_text(separator=' ', strip=True)
         # Nettoyer et tronquer
-        text = ' '.join(text.split())  # Normaliser les espaces
+        text = ' '.join(text.split()) # Normaliser les espaces
         return text[:max_length] + ('...' if len(text) > max_length else '')
     except Exception as e:
         st.write(f"Erreur extraction contenu {url}: {e}")
         return f"Impossible d'extraire le contenu de {url}"
-
 def intelligent_query_expansion(query):
     """
     Expansion intelligente des requêtes pour améliorer les résultats
@@ -564,7 +583,7 @@ def intelligent_query_expansion(query):
     Returns:
         Liste de requêtes expandues
     """
-    expanded_queries = [query]  # Toujours inclure la requête originale
+    expanded_queries = [query] # Toujours inclure la requête originale
     # Détection de mots-clés pour expansion contextuelle
     keywords = {
         'actualité': ['news', 'dernières nouvelles', 'récent'],
@@ -579,9 +598,8 @@ def intelligent_query_expansion(query):
         if trigger in query_lower:
             for expansion in expansions:
                 expanded_queries.append(f"{query} {expansion}")
-    return expanded_queries[:3]  # Limiter à 3 requêtes max
-
-def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search_type="both", chat_vectordb=None):  # AJOUT MÉMOIRE VECTORIELLE: Param pour chat_vectordb
+    return expanded_queries[:3] # Limiter à 3 requêtes max
+def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search_type="both", chat_vectordb=None): # AJOUT MÉMOIRE VECTORIELLE: Param pour chat_vectordb
     """
     Recherche hybride améliorée combinant RAG local et web avec intelligence
     Args:
@@ -599,7 +617,7 @@ def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search
     local_docs = rag_search(query, vectordb, k)
     for doc in local_docs:
         doc.metadata['search_source'] = 'local_rag'
-        doc.metadata['relevance_score'] = 1.0  # Score max pour les docs locaux
+        doc.metadata['relevance_score'] = 1.0 # Score max pour les docs locaux
     all_results.extend(local_docs)
     # AJOUT MÉMOIRE VECTORIELLE: Recherche dans historique chat pour contexte conversationnel
     if chat_vectordb:
@@ -607,7 +625,7 @@ def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search
         for doc in chat_docs:
             doc.metadata['search_source'] = 'chat_history'
             doc.metadata['relevance_score'] = 0.9
-        all_results.extend(chat_docs[:2])  # Limiter à 2 pour éviter surcharge
+        all_results.extend(chat_docs[:2]) # Limiter à 2 pour éviter surcharge
     # 2. Recherche web intelligente si activée
     if web_search_enabled:
         st.write(f"🌐 Recherche web activée pour: {query}")
@@ -659,9 +677,8 @@ def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search
                 unique_web_results.append(doc)
         # Trier par score de pertinence
         unique_web_results.sort(key=lambda x: x.metadata.get('relevance_score', 0), reverse=True)
-        all_results.extend(unique_web_results[:5])  # Max 5 résultats web
+        all_results.extend(unique_web_results[:5]) # Max 5 résultats web
     return all_results
-
 def generate_answer_enhanced(question, context_docs, model_name, include_sources=True):
     """
     Génération de réponse améliorée avec gestion des sources multiples
@@ -679,7 +696,7 @@ def generate_answer_enhanced(question, context_docs, model_name, include_sources
         context_parts = []
         local_sources = []
         web_sources = []
-        chat_sources = []  # AJOUT MÉMOIRE VECTORIELLE: Sources pour historique chat
+        chat_sources = [] # AJOUT MÉMOIRE VECTORIELLE: Sources pour historique chat
         for i, doc in enumerate(context_docs):
             source = doc.metadata.get('source', 'Document inconnu')
             doc_type = doc.metadata.get('type', 'unknown')
@@ -710,9 +727,9 @@ RÉPONSE DÉTAILLÉE:"""
     try:
         client = create_client()
         messages = [{"role": "user", "content": prompt}]
-        response = client.chat.completions.create(
-            model=model_name,
+        response = client.chat_completion(
             messages=messages,
+            model=model_name,
             max_tokens=600,
             temperature=0.3
         )
@@ -720,23 +737,56 @@ RÉPONSE DÉTAILLÉE:"""
         # Ajouter les sources si demandé
         if include_sources and context_docs:
             sources_text = "\n\n📚 **Sources consultées:**\n"
-            if chat_sources:  # AJOUT MÉMOIRE VECTORIELLE
+            if chat_sources: # AJOUT MÉMOIRE VECTORIELLE
                 sources_text += "**Historique conversation:**\n"
                 for source in chat_sources[:2]:
                     sources_text += f"• {source}\n"
             if local_sources:
                 sources_text += "**Documents locaux:**\n"
-                for source in local_sources[:3]:  # Limiter l'affichage
+                for source in local_sources[:3]: # Limiter l'affichage
                     sources_text += f"• {source}\n"
             if web_sources:
                 sources_text += "**Sources web:**\n"
-                for source in web_sources[:3]:  # Limiter l'affichage
+                for source in web_sources[:3]: # Limiter l'affichage
                     sources_text += f"• {source}\n"
             answer += sources_text
         return answer
     except Exception as e:
-        return f"❌ Erreur génération: {str(e)}"
-
+        error_str = str(e)
+        # Check for payment error and retry with LocalClient
+        if "402" in error_str or "Payment Required" in error_str:
+            try:
+                # Retry with LocalClient
+                local_client = LocalClient()
+                messages = [{"role": "user", "content": prompt}]
+                response = local_client.chat_completion(
+                    messages=messages,
+                    model=model_name,
+                    max_tokens=600,
+                    temperature=0.3
+                )
+                answer = response.choices[0].message.content
+                # Ajouter les sources si demandé
+                if include_sources and context_docs:
+                    sources_text = "\n\n📚 **Sources consultées (mode local):**\n"
+                    if chat_sources:
+                        sources_text += "**Historique conversation:**\n"
+                        for source in chat_sources[:2]:
+                            sources_text += f"• {source}\n"
+                    if local_sources:
+                        sources_text += "**Documents locaux:**\n"
+                        for source in local_sources[:3]:
+                            sources_text += f"• {source}\n"
+                    if web_sources:
+                        sources_text += "**Sources web:**\n"
+                        for source in web_sources[:3]:
+                            sources_text += f"• {source}\n"
+                    answer += sources_text
+                return answer + "\n\n⚠️ Réponse générée en mode local (API distante indisponible)."
+            except Exception as local_e:
+                return f"❌ Erreur génération (même en local): {str(local_e)}"
+        else:
+            return f"❌ Erreur génération: {error_str}"
 # ===============================================
 # Fonctions Web Search et Hybrid (Mises à jour)
 # ===============================================
@@ -747,11 +797,9 @@ def web_search(query, max_results=5):
         return [f"{r.get('title', '')}: {r.get('href', r.get('url', ''))} - {r.get('body', '')}" for r in results]
     except Exception as e:
         return [f"❌ Erreur recherche web: {e}"]
-
 def hybrid_search(query, vectordb, k=3):
     """Version simplifiée pour compatibilité"""
     return hybrid_search_enhanced(query, vectordb, k, web_search_enabled=True)
-
 def final_search(question, vectordb, graph, pois):
     """Recherche finale combinant toutes les sources"""
     results = hybrid_search_enhanced(question, vectordb, k=3, web_search_enabled=True)
@@ -767,7 +815,6 @@ def final_search(question, vectordb, graph, pois):
         except:
             pass
     return results
-
 # ===============================================
 # Fonctions Modèles Hugging Face Spécialisés
 # ===============================================
@@ -802,10 +849,8 @@ def initialize_specialized_models():
         st.write(f"⚠️ Erreur chargement NER: {e}")
         models['ner'] = None
     return models
-
 # Initialiser les modèles
 SPECIALIZED_MODELS = initialize_specialized_models()
-
 def summarize_text(text):
     if SPECIALIZED_MODELS.get('summarizer') is None:
         return "❌ Modèle de résumé non disponible"
@@ -813,7 +858,6 @@ def summarize_text(text):
         return SPECIALIZED_MODELS['summarizer'](text[:1024], max_length=200, min_length=30, do_sample=False)[0]['summary_text']
     except Exception as e:
         return f"❌ Erreur résumé: {e}"
-
 def translate_text(text, src_lang="fr", tgt_lang="en"):
     if SPECIALIZED_MODELS.get('translator') is None:
         return "❌ Modèle de traduction non disponible"
@@ -821,7 +865,6 @@ def translate_text(text, src_lang="fr", tgt_lang="en"):
         return SPECIALIZED_MODELS['translator'](text)[0]['translation_text']
     except Exception as e:
         return f"❌ Erreur traduction: {e}"
-
 def caption_image(image_path):
     client = create_client()
     model = "llava-hf/llava-1.5-7b-hf"
@@ -830,7 +873,6 @@ def caption_image(image_path):
         return client.image_to_text(image_path, prompt=prompt, model=model, max_tokens=500)
     except Exception as e:
         return f"❌ Erreur caption: {e}"
-
 def extract_entities(text):
     if SPECIALIZED_MODELS.get('ner') is None:
         return "❌ Modèle NER non disponible"
@@ -838,7 +880,6 @@ def extract_entities(text):
         return SPECIALIZED_MODELS['ner'](text)
     except Exception as e:
         return f"❌ Erreur NER: {e}"
-
 # ===============================================
 # Fonctions de génération avec Stable Diffusion et similaires
 # ===============================================
@@ -854,7 +895,6 @@ def generate_text_to_image(prompt):
         return f"Image générée et sauvegardée à {path}"
     except Exception as e:
         return f"❌ Erreur génération image: {e}"
-
 def generate_text_to_video(prompt):
     """Génère une vidéo à partir de texte"""
     try:
@@ -865,13 +905,12 @@ def generate_text_to_video(prompt):
         else:
             pipe.to(device)
         gen = pipe(prompt, num_inference_steps=25)
-        frames = gen.frames[0]  # Assuming batch size 1
+        frames = gen.frames[0] # Assuming batch size 1
         path = os.path.join(GENERATED_PATH, f"video_{int(time.time())}.gif")
         imageio.mimsave(path, frames, fps=5)
         return f"Vidéo générée et sauvegardée à {path}"
     except Exception as e:
         return f"❌ Erreur génération vidéo: {e}"
-
 def generate_text_to_audio(prompt):
     """Génère un son à partir de texte"""
     try:
@@ -880,11 +919,10 @@ def generate_text_to_audio(prompt):
         pipe.to(device)
         audio = pipe(prompt, audio_length_in_s=5.0).audios[0]
         path = os.path.join(GENERATED_PATH, f"audio_{int(time.time())}.wav")
-        wavfile.write(path, rate=16000, data=audio)  # Assuming 16kHz sample rate
+        wavfile.write(path, rate=16000, data=audio) # Assuming 16kHz sample rate
         return f"Son généré et sauvegardé à {path}"
     except Exception as e:
         return f"❌ Erreur génération son: {e}"
-
 def generate_text_to_3d(prompt):
     """Génère un modèle 3D à partir de texte (rendue image)"""
     try:
@@ -898,7 +936,6 @@ def generate_text_to_3d(prompt):
         return f"Rendu 3D généré et sauvegardé à {path}"
     except Exception as e:
         return f"❌ Erreur génération 3D (texte): {e}"
-
 def generate_image_to_3d(image_path):
     """Génère un modèle 3D à partir d'une image (rendue image)"""
     try:
@@ -913,11 +950,10 @@ def generate_image_to_3d(image_path):
         return f"Rendu 3D généré à partir de l'image et sauvegardé à {path}"
     except Exception as e:
         return f"❌ Erreur génération 3D (image): {e}"
-
 # ===============================================
 # Agent LangChain Amélioré avec Recherche Web
 # ===============================================
-def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None):  # AJOUT MÉMOIRE VECTORIELLE: Param pour chat
+def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None): # AJOUT MÉMOIRE VECTORIELLE: Param pour chat
     """
     Crée un agent LangChain amélioré avec capacités de recherche web
     Args:
@@ -936,106 +972,110 @@ def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None)
             temperature=0.3,
             max_new_tokens=600
         )
-        # Configuration des outils de recherche web
-        search_wrapper = DuckDuckGoSearchAPIWrapper(
-            region="fr-fr",
-            time="d",
-            max_results=5
-        )
-        search_tool = TavilySearchResults(api_key=TAVILY_API_KEY, max_results=5)
-        search_results_tool = TavilySearchResults(api_key=TAVILY_API_KEY, max_results=5, include_raw_content=True)
-        tools = [
-            # Outils de base RAG et recherche
-            Tool(
-                name="Local_Knowledge_Base",
-                func=lambda q: "\n\n".join([d.page_content for d in rag_search(q, vectordb, k=3)]),
-                description="Recherche dans la base de connaissances locale (PDFs et documents internes). Utilise ceci en PREMIER pour les questions sur des documents spécifiques."
-            ),
-            Tool(
-                name="Chat_History_Search",  # AJOUT MÉMOIRE VECTORIELLE: Nouvel outil pour historique
-                func=lambda q: "\n\n".join([d.page_content for d in chat_rag_search(q, chat_vectordb, k=3)]),
-                description="Recherche dans l'historique des conversations passées pour maintenir la continuité. Utilise pour les suites de discussion."
-            ),
-            Tool(
-                name="Web_Search",
-                func=lambda q: search_tool.run(q),
-                description="Recherche sur Internet pour des informations récentes, actualités, ou des connaissances générales non disponibles localement."
-            ),
-            Tool(
-                name="Web_Search_Detailed",
-                func=lambda q: search_results_tool.run(q),
-                description="Recherche web détaillée avec sources et liens. Utilise pour obtenir des résultats web structurés avec URLs."
-            ),
-            Tool(
-                name="Hybrid_Search",
-                func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=3, web_search_enabled=True, chat_vectordb=chat_vectordb)]),
-                description="Recherche hybride combinant base locale, historique chat ET web. Idéal pour des questions nécessitant à la fois des données internes, passées et externes."
-            ),
-            Tool(
-                name="Current_News_Search",
-                func=lambda q: "\n\n".join([f"{r.get('title', '')}: {r.get('body', '')}" for r in enhanced_web_search(q, search_type="news")]),
-                description="Recherche spécialisée pour les actualités récentes et informations temporelles."
-            ),
-            # Outils spécialisés
-            Tool(
-                name="OSM_Route_Calculator",
-                func=lambda q: calculer_trajet(q, graph, pois)[1] if graph and pois else "❌ Aucune carte OSM disponible",
-                description="Calcule des itinéraires routiers entre deux lieux. Utilise pour les questions de navigation, trajets, ou géolocalisation."
-            ),
-            Tool(
-                name="Smart_Content_Extractor",
-                func=lambda url: smart_content_extraction(url) if url.startswith('http') else "❌ URL invalide",
-                description="Extrait le contenu détaillé d'une page web spécifique. Fournis une URL complète."
-            ),
-            Tool(
-                name="Text_Summarizer",
-                func=summarize_text,
-                description="Résume un texte long en version concise. Utile pour synthétiser des informations volumineuses."
-            ),
-            Tool(
-                name="Language_Translator",
-                func=translate_text,
-                description="Traduit du français vers l'anglais. Utile pour traiter des sources en langue étrangère."
-            ),
-            Tool(
-                name="Image_Analyzer",
-                func=caption_image,
-                description="Analyse et décrit le contenu d'une image. Fournis le chemin vers un fichier image."
-            ),
-            Tool(
-                name="Entity_Extractor",
-                func=lambda t: json.dumps(extract_entities(t)),
-                description="Extrait des entités nommées (personnes, lieux, organisations) d'un texte."
-            ),
-            # Nouveaux outils Stable Diffusion via API
-            Tool(
-                name="Text_To_Image_Generator",
-                func=generate_text_to_image,
-                description="Génère une image à partir d'une description textuelle. Fournis un prompt descriptif."
-            ),
-            Tool(
-                name="Text_To_Video_Generator",
-                func=generate_text_to_video,
-                description="Génère une vidéo à partir d'une description textuelle. Fournis un prompt descriptif."
-            ),
-            Tool(
-                name="Text_To_Audio_Generator",
-                func=generate_text_to_audio,
-                description="Génère un son ou audio à partir d'une description textuelle. Fournis un prompt descriptif."
-            ),
-            Tool(
-                name="Text_To_3D_Generator",
-                func=generate_text_to_3d,
-                description="Génère un modèle 3D (rendue image) à partir d'une description textuelle. Fournis un prompt descriptif."
-            ),
-            Tool(
-                name="Image_To_3D_Generator",
-                func=generate_image_to_3d,
-                description="Génère un modèle 3D (rendue image) à partir d'une image. Fournis le chemin vers un fichier image."
-            ),
-        ]
-        # Configuration de l'agent avec prompt personnalisé (ajout chat)
-        agent_prompt = """Tu es Kibali, un assistant IA avancé avec accès à de multiples sources d'information.
+    except Exception as e:
+        st.write(f"❌ Erreur HuggingFaceEndpoint: {e}. Passage en mode local.")
+        pipe = pipeline("text-generation", model=MODEL_PATH, tokenizer=MODEL_PATH, max_new_tokens=600, temperature=0.3, device_map="auto")
+        llm = HuggingFacePipeline(pipeline=pipe)
+    # Configuration des outils de recherche web
+    search_wrapper = DuckDuckGoSearchAPIWrapper(
+        region="fr-fr",
+        time="d",
+        max_results=5
+    )
+    search_tool = TavilySearchResults(api_key=TAVILY_API_KEY, max_results=5)
+    search_results_tool = TavilySearchResults(api_key=TAVILY_API_KEY, max_results=5, include_raw_content=True)
+    tools = [
+        # Outils de base RAG et recherche
+        Tool(
+            name="Local_Knowledge_Base",
+            func=lambda q: "\n\n".join([d.page_content for d in rag_search(q, vectordb, k=3)]),
+            description="Recherche dans la base de connaissances locale (PDFs et documents internes). Utilise ceci en PREMIER pour les questions sur des documents spécifiques."
+        ),
+        Tool(
+            name="Chat_History_Search", # AJOUT MÉMOIRE VECTORIELLE: Nouvel outil pour historique
+            func=lambda q: "\n\n".join([d.page_content for d in chat_rag_search(q, chat_vectordb, k=3)]),
+            description="Recherche dans l'historique des conversations passées pour maintenir la continuité. Utilise pour les suites de discussion."
+        ),
+        Tool(
+            name="Web_Search",
+            func=lambda q: search_tool.run(q),
+            description="Recherche sur Internet pour des informations récentes, actualités, ou des connaissances générales non disponibles localement."
+        ),
+        Tool(
+            name="Web_Search_Detailed",
+            func=lambda q: search_results_tool.run(q),
+            description="Recherche web détaillée avec sources et liens. Utilise pour obtenir des résultats web structurés avec URLs."
+        ),
+        Tool(
+            name="Hybrid_Search",
+            func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=3, web_search_enabled=True, chat_vectordb=chat_vectordb)]),
+            description="Recherche hybride combinant base locale, historique chat ET web. Idéal pour des questions nécessitant à la fois des données internes, passées et externes."
+        ),
+        Tool(
+            name="Current_News_Search",
+            func=lambda q: "\n\n".join([f"{r.get('title', '')}: {r.get('body', '')}" for r in enhanced_web_search(q, search_type="news")]),
+            description="Recherche spécialisée pour les actualités récentes et informations temporelles."
+        ),
+        # Outils spécialisés
+        Tool(
+            name="OSM_Route_Calculator",
+            func=lambda q: calculer_trajet(q, graph, pois)[1] if graph and pois else "❌ Aucune carte OSM disponible",
+            description="Calcule des itinéraires routiers entre deux lieux. Utilise pour les questions de navigation, trajets, ou géolocalisation."
+        ),
+        Tool(
+            name="Smart_Content_Extractor",
+            func=lambda url: smart_content_extraction(url) if url.startswith('http') else "❌ URL invalide",
+            description="Extrait le contenu détaillé d'une page web spécifique. Fournis une URL complète."
+        ),
+        Tool(
+            name="Text_Summarizer",
+            func=summarize_text,
+            description="Résume un texte long en version concise. Utile pour synthétiser des informations volumineuses."
+        ),
+        Tool(
+            name="Language_Translator",
+            func=translate_text,
+            description="Traduit du français vers l'anglais. Utile pour traiter des sources en langue étrangère."
+        ),
+        Tool(
+            name="Image_Analyzer",
+            func=caption_image,
+            description="Analyse et décrit le contenu d'une image. Fournis le chemin vers un fichier image."
+        ),
+        Tool(
+            name="Entity_Extractor",
+            func=lambda t: json.dumps(extract_entities(t)),
+            description="Extrait des entités nommées (personnes, lieux, organisations) d'un texte."
+        ),
+        # Nouveaux outils Stable Diffusion via API
+        Tool(
+            name="Text_To_Image_Generator",
+            func=generate_text_to_image,
+            description="Génère une image à partir d'une description textuelle. Fournis un prompt descriptif."
+        ),
+        Tool(
+            name="Text_To_Video_Generator",
+            func=generate_text_to_video,
+            description="Génère une vidéo à partir d'une description textuelle. Fournis un prompt descriptif."
+        ),
+        Tool(
+            name="Text_To_Audio_Generator",
+            func=generate_text_to_audio,
+            description="Génère un son ou audio à partir d'une description textuelle. Fournis un prompt descriptif."
+        ),
+        Tool(
+            name="Text_To_3D_Generator",
+            func=generate_text_to_3d,
+            description="Génère un modèle 3D (rendue image) à partir d'une description textuelle. Fournis un prompt descriptif."
+        ),
+        Tool(
+            name="Image_To_3D_Generator",
+            func=generate_image_to_3d,
+            description="Génère un modèle 3D (rendue image) à partir d'une image. Fournis le chemin vers un fichier image."
+        ),
+    ]
+    # Configuration de l'agent avec prompt personnalisé (ajout chat)
+    agent_prompt = PromptTemplate.from_template("""Tu es Kibali, un assistant IA avancé avec accès à de multiples sources d'information.
 CAPACITÉS DISPONIBLES:
 - Base de connaissances locale (PDFs et documents)
 - Historique des conversations passées pour continuité
@@ -1053,7 +1093,9 @@ INSTRUCTIONS IMPORTANTES:
 6. Si les informations se contredisent, mentionne les deux perspectives
 7. Reste concis mais informatif
 8. Pour les générations, sauvegarde les fichiers et retourne le chemin
+
 Tu as accès aux outils suivants: {tools}
+
 Utilise le format suivant:
 Question: la question d'entrée
 Thought: réfléchis à ce que tu dois faire
@@ -1063,29 +1105,28 @@ Observation: le résultat de l'action
 ... (ce Thought/Action/Action Input/Observation peut se répéter N fois)
 Thought: Je connais maintenant la réponse finale
 Final Answer: la réponse finale à la question d'entrée
+
 Commence!
 Question: {input}
-Thought: {agent_scratchpad}"""
-        agent = initialize_agent(
-            tools,
-            llm,
-            agent="zero-shot-react-description",
-            verbose=True,
-            max_iterations=5,
-            early_stopping_method="generate",
-            handle_parsing_errors=True
-        )
-        st.write(f"✅ Agent créé avec {len(tools)} outils disponibles")
-        return agent
-    except Exception as e:
-        st.write(f"❌ Erreur création agent: {e}")
-        return None
+Thought: {agent_scratchpad}""")
 
+    # Créer l'agent avec la nouvelle API LangChain 1.0
+    agent = create_react_agent(llm, tools, agent_prompt)
+
+    agent_executor = AgentExecutor(
+        agent=agent,
+        tools=tools,
+        verbose=True,
+        max_iterations=5,
+        early_stopping_method="generate",
+        handle_parsing_errors=True
+    )
+    st.write(f"✅ Agent créé avec {len(tools)} outils disponibles")
+    return agent_executor
 # Alias pour compatibilité
 def create_agent(model_name, vectordb, graph, pois):
     """Version simplifiée pour compatibilité ascendante"""
     return create_enhanced_agent(model_name, vectordb, graph, pois)
-
 # ===============================================
 # Fonctions OSM et Graphe Routier
 # ===============================================
@@ -1097,14 +1138,12 @@ def haversine(lon1, lat1, lon2, lat2):
     dlambda = math.radians(lon2 - lon1)
     a = math.sin(dphi/2.0)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2.0)**2
     return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
-
 class RoadPOIHandler(osmium.SimpleHandler):
     """Handler pour extraire routes et POIs depuis OSM"""
     def __init__(self):
         super().__init__()
         self.graph = nx.Graph()
         self.pois = []
-
     def node(self, n):
         """Extraire les POIs (points d'intérêt)"""
         if n.location.valid() and n.tags:
@@ -1118,7 +1157,6 @@ class RoadPOIHandler(osmium.SimpleHandler):
                     'lat': n.location.lat,
                     'tags': dict(n.tags)
                 })
-
     def way(self, w):
         """Extraire les routes"""
         if 'highway' in w.tags:
@@ -1134,7 +1172,6 @@ class RoadPOIHandler(osmium.SimpleHandler):
                 self.graph.add_node(n1, x=lon1, y=lat1)
                 self.graph.add_node(n2, x=lon2, y=lat2)
                 self.graph.add_edge(n1, n2, length=dist, highway=w.tags.get("highway"))
-
 def trouver_noeud_plus_proche(lon, lat, graph):
     """Trouve le nœud du graphe le plus proche"""
     min_dist = float("inf")
@@ -1146,7 +1183,6 @@ def trouver_noeud_plus_proche(lon, lat, graph):
             min_dist = dist
             closest_node = node
     return closest_node
-
 def chercher_poi_par_nom(nom, pois_list):
     """Recherche un POI par nom"""
     nom_lower = nom.lower()
@@ -1154,12 +1190,11 @@ def chercher_poi_par_nom(nom, pois_list):
         if nom_lower in poi['name'].lower() or nom_lower in poi['amenity'].lower():
             return poi
     return None
-
 def generer_carte_trajet(graph, path, pois_list, start_poi=None, end_poi=None):
     """Génère une carte 2D du trajet"""
     fig, ax = plt.subplots(figsize=(12, 10))
     # Dessiner le graphe en arrière-plan
-    for edge in list(graph.edges())[:1000]:  # Limiter pour la performance
+    for edge in list(graph.edges())[:1000]: # Limiter pour la performance
         node1, node2 = edge
         x1, y1 = node1[0], node1[1]
         x2, y2 = node2[0], node2[1]
@@ -1188,7 +1223,6 @@ def generer_carte_trajet(graph, path, pois_list, start_poi=None, end_poi=None):
     buf.seek(0)
     plt.close()
     return buf
-
 def calculer_trajet(question, graph, pois_list):
     """Calcule un trajet basé sur une question textuelle"""
     if not graph or not pois_list:
@@ -1202,9 +1236,9 @@ Réponds au format exact:
 Départ: [nom du lieu de départ]
 Arrivée: [nom du lieu d'arrivée]"""
         messages = [{"role": "user", "content": prompt}]
-        response = client.chat.completions.create(
-            model=WORKING_MODELS["Llama 3.1 8B (Équilibré)"],
+        response = client.chat_completion(
             messages=messages,
+            model=WORKING_MODELS["Llama 3.1 8B (Équilibré)"],
             max_tokens=100,
             temperature=0.1
         )
@@ -1254,7 +1288,6 @@ Arrivée: [nom du lieu d'arrivée]"""
         return None, f"❌ Aucun chemin trouvé entre {start_poi['name']} et {end_poi['name']}", None
     except Exception as e:
         return None, f"❌ Erreur: {str(e)}", None
-
 # ===============================================
 # Fonctions utilitaires pour images
 # ===============================================
@@ -1264,14 +1297,12 @@ def fig_to_pil(fig):
     buf.seek(0)
     plt.close(fig)
     return Image.open(buf)
-
 def df_to_html(df, max_rows=10):
     # Réduire le tableau si trop long
     if len(df) > max_rows:
         summary_row = pd.DataFrame({col: ['...'] for col in df.columns})
         df = pd.concat([df.head(max_rows // 2), summary_row, df.tail(max_rows // 2)])
     return df.to_html(index=False, escape=False)
-
 # ===============================================
 # Fonctions Image Analysis
 # ===============================================
@@ -1317,7 +1348,6 @@ def classify_soil(image: np.ndarray):
         "possible_contents": possible_contents,
         "possible_minerals": possible_minerals
     }, hist_img, metrics_html
-
 def simulate_infrared(image: np.ndarray):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     ir_img = cv2.applyColorMap(gray, cv2.COLORMAP_JET)
@@ -1330,7 +1360,6 @@ def simulate_infrared(image: np.ndarray):
     mean_intensity = np.mean(gray)
     ir_analysis = f"Simulation IR: Intensité moyenne {mean_intensity:.2f} (plus rouge = plus chaud, bleu = plus froid)"
     return ir_pil, ir_analysis
-
 def detect_objects(image: np.ndarray, scale_factor=0.1):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, thresh = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
@@ -1340,7 +1369,7 @@ def detect_objects(image: np.ndarray, scale_factor=0.1):
     types = []
     for cnt in contours:
         x, y, w, h = cv2.boundingRect(cnt)
-        if w < 10 or h < 10: continue  # skip small
+        if w < 10 or h < 10: continue # skip small
         cv2.rectangle(img_with_contours, (x, y), (x+w, y+h), (0, 255, 0), 2)
         w_m = w * scale_factor
         h_m = h * scale_factor
@@ -1369,7 +1398,6 @@ def detect_objects(image: np.ndarray, scale_factor=0.1):
     else:
         dim_html = ""
     return num_objects, obj_img, dim_html
-
 def detect_fences(image: np.ndarray, scale_factor=0.1):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(gray, 100, 200)
@@ -1403,7 +1431,6 @@ def detect_fences(image: np.ndarray, scale_factor=0.1):
     else:
         fence_html = ""
     return len(lengths), fence_img, fence_html
-
 def detect_anomalies(image: np.ndarray):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(gray, 100, 200)
@@ -1442,7 +1469,6 @@ def detect_anomalies(image: np.ndarray):
     })
     anomaly_desc_html = df_to_html(anomaly_desc_df)
     return anomalies, var_hist_img, anomaly_html, anomaly_desc_html
-
 def advanced_analyses(image: np.ndarray):
     analyses = {}
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -1473,7 +1499,6 @@ def advanced_analyses(image: np.ndarray):
     hydro_df = pd.DataFrame({'Métrique': ['Pourcentage Eau'], 'Valeur': [water_area], 'Explication': ['Zone potentielle pour ressources hydriques']})
     adv_tables.append(df_to_html(hydro_df))
     return analyses, {}, adv_images, adv_tables
-
 def process_image(uploaded_file):
     image = Image.open(BytesIO(uploaded_file))
     img_array = np.array(image)
@@ -1509,9 +1534,9 @@ def process_image(uploaded_file):
     tables_html.append('<h3>Métriques Anomalies</h3>' + anomaly_html)
     # Advanced
     analyses, predictions, adv_images, adv_tables = advanced_analyses(img_array)
-    proc_images += adv_images[:5]  # Limiter le nombre d'images
+    proc_images += adv_images[:5] # Limiter le nombre d'images
     captions += ['Analyse Avancée'] * len(adv_images[:5])
-    tables_html += adv_tables[:3]  # Limiter le nombre de tableaux
+    tables_html += adv_tables[:3] # Limiter le nombre de tableaux
     analysis_data = {
         "soil": soil,
         "ir_analysis": ir_analysis,
@@ -1523,7 +1548,6 @@ def process_image(uploaded_file):
     }
     tables_str = '<br>'.join(tables_html)
     return analysis_data, proc_images, tables_str
-
 def improve_analysis_with_llm(analysis_data, model_name):
     prompt = f"""Analyse les données suivantes de l'image et fournis une analyse naturelle améliorée:
 DONNÉES:
@@ -1532,22 +1556,20 @@ ANALYSE AMÉLIORÉE:"""
     try:
         client = create_client()
         messages = [{"role": "user", "content": prompt}]
-        response = client.chat.completions.create(
-            model=model_name,
+        response = client.chat_completion(
             messages=messages,
+            model=model_name,
             max_tokens=800,
             temperature=0.5
         )
         return response.choices[0].message.content
     except Exception as e:
         return f"❌ Erreur: {str(e)}"
-
-def update_agent(model_choice, vectordb, graph, pois, chat_vectordb=None):  # AJOUT MÉMOIRE VECTORIELLE
+def update_agent(model_choice, vectordb, graph, pois, chat_vectordb=None): # AJOUT MÉMOIRE VECTORIELLE
     model_name = WORKING_MODELS[model_choice]
     agent = create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb)
     cache_info = get_cache_stats()
     return model_name, agent, cache_info
-
 def handle_clear_cache():
     """Vide le cache web"""
     try:
@@ -1556,7 +1578,6 @@ def handle_clear_cache():
         return "✅ Cache web vidé"
     except Exception as e:
         return f"❌ Erreur: {e}"
-
 def highlight_important_words(text):
     """Met en évidence les mots importants avec effet scintillante et tooltip"""
     # Mots-clés simples pour exemple (peut être étendu avec NER)
@@ -1564,7 +1585,6 @@ def highlight_important_words(text):
     for keyword in important_keywords:
         text = re.sub(rf'\b({keyword})\b', r'<span class="sparkle-word" title="\1: Terme clé pour la compréhension du contexte">\1</span>', text, flags=re.IGNORECASE)
     return text
-
 def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph, pois, web_enabled):
     # AJOUT MÉMOIRE VECTORIELLE: Charger la base chat
     chat_vectordb, _ = load_chat_vectordb()
@@ -1591,7 +1611,6 @@ def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph,
     # Appliquer highlighting pour fluidité
     response = highlight_important_words(response)
     return response
-
 def handle_web_search(query, search_type):
     if not query.strip():
         return "⚠️ Veuillez entrer une requête"
@@ -1622,7 +1641,6 @@ def handle_web_search(query, search_type):
         return html_output
     except Exception as e:
         return f"❌ Erreur recherche: {e}"
-
 def handle_content_extraction(url):
     if not url.strip():
         return "⚠️ Veuillez entrer une URL"
@@ -1633,7 +1651,6 @@ def handle_content_extraction(url):
         return content
     except Exception as e:
         return f"❌ Erreur extraction: {e}"
-
 # ===============================================
 # Fonctions utilitaires supplémentaires
 # ===============================================
@@ -1649,7 +1666,7 @@ def get_system_status():
         },
         "files": {
             "vectordb": os.path.exists(VECTORDB_PATH),
-            "chat_vectordb": os.path.exists(CHAT_VECTORDB_PATH),  # AJOUT MÉMOIRE VECTORIELLE
+            "chat_vectordb": os.path.exists(CHAT_VECTORDB_PATH), # AJOUT MÉMOIRE VECTORIELLE
             "metadata": os.path.exists(METADATA_PATH),
             "trajectories": os.path.exists(TRAJECTORIES_PATH),
             "web_cache": os.path.exists(WEB_CACHE_PATH)
@@ -1662,7 +1679,6 @@ def get_system_status():
         "token_configured": bool(HF_TOKEN and len(HF_TOKEN) > 10)
     }
     return status
-
 def cleanup_old_cache():
     """Nettoie les entrées expirées du cache"""
     try:
@@ -1679,7 +1695,6 @@ def cleanup_old_cache():
         return f"✅ Cache nettoyé: {removed_count} entrées expirées supprimées, {len(cleaned_cache)} conservées"
     except Exception as e:
         return f"❌ Erreur nettoyage cache: {e}"
-
 def export_system_config():
     """Exporte la configuration système pour debug"""
     config = {
@@ -1688,7 +1703,7 @@ def export_system_config():
         "paths": {
             "chatbot_dir": CHATBOT_DIR,
             "vectordb_path": VECTORDB_PATH,
-            "chat_vectordb_path": CHAT_VECTORDB_PATH,  # AJOUT MÉMOIRE VECTORIELLE
+            "chat_vectordb_path": CHAT_VECTORDB_PATH, # AJOUT MÉMOIRE VECTORIELLE
             "pdfs_path": PDFS_PATH,
             "graphs_path": GRAPHS_PATH,
             "maps_path": MAPS_PATH
@@ -1701,7 +1716,7 @@ def export_system_config():
             "image_analysis": True,
             "pdf_processing": True,
             "caching": True,
-            "chat_memory": True  # AJOUT MÉMOIRE VECTORIELLE
+            "chat_memory": True # AJOUT MÉMOIRE VECTORIELLE
         }
     }
     config_path = os.path.join(CHATBOT_DIR, "system_config.json")
@@ -1711,7 +1726,6 @@ def export_system_config():
         return f"✅ Configuration exportée: {config_path}"
     except Exception as e:
         return f"❌ Erreur export: {e}"
-
 def test_all_features():
     """Teste toutes les fonctionnalités principales"""
     results = {}
@@ -1733,7 +1747,7 @@ def test_all_features():
         results["vectordb"] = vectordb is not None
     except:
         results["vectordb"] = False
-    # Test base chat  # AJOUT MÉMOIRE VECTORIELLE
+    # Test base chat # AJOUT MÉMOIRE VECTORIELLE
     try:
         chat_vectordb, _ = load_chat_vectordb()
         results["chat_vectordb"] = chat_vectordb is not None
@@ -1746,7 +1760,6 @@ def test_all_features():
     except:
         results["osm_graph"] = False
     return results
-
 # ===============================================
 # Fonctions de maintenance avancées
 # ===============================================
@@ -1761,7 +1774,6 @@ def optimize_vectordb():
         return "✅ Base vectorielle optimisée (fonctionnalité à implémenter)"
     except Exception as e:
         return f"❌ Erreur optimisation: {e}"
-
 def backup_all_data():
     """Crée une sauvegarde de toutes les données"""
     try:
@@ -1778,7 +1790,6 @@ def backup_all_data():
         return f"✅ Sauvegarde créée: {backup_path}"
     except Exception as e:
         return f"❌ Erreur sauvegarde: {e}"
-
 def restore_from_backup(backup_path):
     """Restaure les données depuis une sauvegarde"""
     try:
@@ -1790,7 +1801,6 @@ def restore_from_backup(backup_path):
         return f"✅ Données restaurées depuis: {backup_path}"
     except Exception as e:
         return f"❌ Erreur restauration: {e}"
-
 # ===============================================
 # NOUVEAU: Fonctions Auto-Apprentissage et Sous-Modèles avec Scikit-Learn
 # ===============================================
@@ -1802,7 +1812,7 @@ def create_submodel_from_chat_history(chat_vectordb, submodel_type="classificati
     """
     if not chat_vectordb:
         return None, "❌ Aucune base chat pour entraîner le sous-modèle"
-    
+   
     # Extraire les échanges de l'historique
     exchanges = []
     for doc in list(chat_vectordb.docstore._dict.values()) or []:
@@ -1811,80 +1821,79 @@ def create_submodel_from_chat_history(chat_vectordb, submodel_type="classificati
             user_part = exchange.split("|||")[0].replace("User: ", "").strip()
             ai_part = exchange.split("|||")[1].replace("Assistant: ", "").strip() if "|||" in exchange else ""
             exchanges.append((user_part, ai_part))
-    
+   
     if len(exchanges) < 10:
         return None, "❌ Historique chat trop court pour entraîner un modèle"
-    
+   
     try:
         # Préparation des données : TF-IDF pour vectorisation textuelle
         vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
         X = vectorizer.fit_transform([user[0] for user in exchanges])
-        
+       
         # Pour classification simple (ex: prédire si réponse est informative ou autre)
         # Labels simples basés sur patterns (ex: 0=info, 1=question, 2=autre)
         labels = []
         for user_msg, _ in exchanges:
             if re.search(r'\?', user_msg):
-                labels.append(1)  # Question
+                labels.append(1) # Question
             elif any(word in user_msg.lower() for word in ['info', 'savoir', 'expliquer']):
-                labels.append(0)  # Info
+                labels.append(0) # Info
             else:
-                labels.append(2)  # Autre
-        
+                labels.append(2) # Autre
+       
         X_train, X_test, y_train, y_test = train_test_split(X, labels, test_size=0.2, random_state=42)
-        
+       
         if submodel_type == "classification":
             model = MultinomialNB()
         else:
             model = RandomForestClassifier(n_estimators=50)
-        
+       
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
-        
+       
         # Sauvegarder le modèle et vectorizer
         model_path = os.path.join(SUBMODELS_PATH, f"submodel_{submodel_type}_{int(time.time())}.pkl")
         with open(model_path, 'wb') as f:
             pickle.dump({'model': model, 'vectorizer': vectorizer}, f)
-        
+       
         # Visualisation avec matplotlib : Accuracy plot
         fig, ax = plt.subplots()
-        ax.bar(['Train', 'Test'], [1.0, accuracy])  # Train est parfait par défaut
+        ax.bar(['Train', 'Test'], [1.0, accuracy]) # Train est parfait par défaut
         ax.set_title(f'Précision du sous-modèle {submodel_type.capitalize()}')
         ax.set_ylabel('Accuracy')
         plot_path = os.path.join(SUBMODELS_PATH, f"accuracy_plot_{submodel_type}_{int(time.time())}.png")
         plt.savefig(plot_path)
         plt.close()
-        
+       
         return model_path, f"✅ Sous-modèle {submodel_type} créé avec accuracy {accuracy:.2f}. Sauvegardé: {model_path}"
     except Exception as e:
         return None, f"❌ Erreur création sous-modèle: {e}"
-
 def use_submodel_for_automation(query, submodel_path, submodel_type="classification"):
     """
     Utilise un sous-modèle pour automatiser une réponse, rendant le comportement plus humain (ex: prédiction rapide).
     """
     if not os.path.exists(submodel_path):
         return "❌ Sous-modèle non trouvé"
-    
+   
     try:
         with open(submodel_path, 'rb') as f:
             data = pickle.load(f)
             model = data['model']
             vectorizer = data['vectorizer']
-        
+       
         query_vec = vectorizer.transform([query])
         prediction = model.predict(query_vec)[0]
-        
+       
         # Réponses automatisées basées sur prédiction pour plus d'humanité
         automated_responses = {
             0: "Voici des infos basiques sur ce sujet, basées sur nos échanges passés.",
             1: "Bonne question ! Laisse-moi réfléchir à ça en me basant sur ce qu'on a discuté avant.",
             2: "Intéressant, je vais creuser un peu plus pour te répondre de manière personnalisée."
         }
-        
+       
         response = automated_responses.get(prediction, "Réponse automatisée générée.")
-        
+       
         # Visualisation: Distribution des features TF-IDF pour la query
         fig, ax = plt.subplots()
         tfidf_scores = query_vec.toarray()[0]
@@ -1896,11 +1905,10 @@ def use_submodel_for_automation(query, submodel_path, submodel_type="classificat
         plot_path = os.path.join(SUBMODELS_PATH, f"query_features_{int(time.time())}.png")
         plt.savefig(plot_path)
         plt.close()
-        
+       
         return f"{response} (Prédiction: {prediction}) | Graph: {plot_path}"
     except Exception as e:
         return f"❌ Erreur utilisation sous-modèle: {e}"
-
 # ===============================================
 # NOUVEAU: Fonctions Amélioration Base de Données via Fouille Internet
 # ===============================================
@@ -1910,20 +1918,20 @@ def improve_database_with_web_search(topics, num_results_per_topic=5, vectordb=N
     et améliore la base de données en ajoutant de nouveaux documents.
     """
     specific_topics = topics or ["pétrole extraction techniques", "topographie cartographie avancée", "sciences physiques mécanique sol", "sous-sol géologie ressources"]
-    
+   
     if vectordb is None:
         vectordb, _ = load_vectordb()
         if vectordb is None:
             embedding_model = get_embedding_model()
             vectordb = FAISS.from_texts([""], embedding_model)
-    
+   
     new_documents = []
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    
+   
     for topic in specific_topics:
         st.write(f"🔍 Fouille internet pour: {topic}")
         search_results = enhanced_web_search(topic, max_results=num_results_per_topic, search_type="both")
-        
+       
         for result in search_results:
             content = f"Titre: {result.get('title', '')}\nContenu: {result.get('body', '')}\n"
             url = result.get('href') or result.get('url')
@@ -1931,7 +1939,7 @@ def improve_database_with_web_search(topics, num_results_per_topic=5, vectordb=N
                 extra_content = smart_content_extraction(url, max_length=2000)
                 if "Impossible d'extraire" not in extra_content:
                     content += f"\nContenu détaillé: {extra_content}"
-            
+           
             chunks = text_splitter.split_text(content)
             for i, chunk in enumerate(chunks):
                 doc = Document(
@@ -1944,14 +1952,13 @@ def improve_database_with_web_search(topics, num_results_per_topic=5, vectordb=N
                     }
                 )
                 new_documents.append(doc)
-    
+   
     if new_documents:
         vectordb.add_documents(new_documents)
         vectordb.save_local(VECTORDB_PATH)
         return vectordb, f"✅ Base améliorée: {len(new_documents)} nouveaux chunks ajoutés sur {len(specific_topics)} sujets"
     else:
         return vectordb, "⚠️ Aucun nouveau contenu ajouté"
-
 # ===============================================
 # Version API pour utilisation externe
 # ===============================================
@@ -1959,36 +1966,33 @@ class KibaliAPI:
     """API simplifiée pour utiliser Kibali depuis du code externe"""
     def __init__(self):
         self.vectordb = None
-        self.chat_vectordb = None  # AJOUT MÉMOIRE VECTORIELLE
+        self.chat_vectordb = None # AJOUT MÉMOIRE VECTORIELLE
         self.graph = None
         self.pois = []
         self.client = None
         self.model_name = WORKING_MODELS[list(WORKING_MODELS.keys())[0]]
         # Initialisation automatique
         self._initialize()
-
     def _initialize(self):
         """Initialisation automatique"""
         try:
             setup_drive()
             self.vectordb, _ = load_vectordb()
-            self.chat_vectordb, _ = load_chat_vectordb()  # AJOUT MÉMOIRE VECTORIELLE
+            self.chat_vectordb, _ = load_chat_vectordb() # AJOUT MÉMOIRE VECTORIELLE
             self.graph, self.pois, _ = load_existing_graph()
             self.client = create_client()
         except Exception as e:
             print(f"⚠️ Initialisation partielle: {e}")
-
     def ask(self, question, use_web=True):
         """Pose une question simple"""
         try:
             if use_web:
-                docs = hybrid_search_enhanced(question, self.vectordb, web_search_enabled=True, chat_vectordb=self.chat_vectordb)  # AJOUT MÉMOIRE VECTORIELLE
+                docs = hybrid_search_enhanced(question, self.vectordb, web_search_enabled=True, chat_vectordb=self.chat_vectordb) # AJOUT MÉMOIRE VECTORIELLE
             else:
                 docs = rag_search(question, self.vectordb)
             return generate_answer_enhanced(question, docs, self.model_name)
         except Exception as e:
             return f"❌ Erreur: {e}"
-
     def search_web(self, query, max_results=5):
         """Recherche web simple"""
         try:
@@ -1996,7 +2000,6 @@ class KibaliAPI:
             return [{"title": r.get("title"), "url": r.get("href", r.get("url")), "snippet": r.get("body")} for r in results]
         except Exception as e:
             return [{"error": str(e)}]
-
     def calculate_route(self, from_place, to_place):
         """Calcule un itinéraire"""
         try:
@@ -2005,25 +2008,20 @@ class KibaliAPI:
             return {"response": response, "info": info}
         except Exception as e:
             return {"error": str(e)}
-
     def get_status(self):
         """Retourne le statut du système"""
         return get_system_status()
-
     # NOUVEAU: Méthodes API pour auto-apprentissage et amélioration DB
     def train_submodel(self, submodel_type="classification"):
         """Entraîne un sous-modèle"""
         path, msg = create_submodel_from_chat_history(self.chat_vectordb, submodel_type)
         return {"path": path, "message": msg}
-
     def improve_db(self, topics=None, num_results=5):
         """Améliore la DB avec fouille internet"""
         self.vectordb, msg = improve_database_with_web_search(topics, num_results, self.vectordb)
         return {"message": msg}
-
 # Instance globale de l'API
 kibali_api = KibaliAPI()
-
 # ===============================================
 # Interface Streamlit Améliorée
 # ===============================================
@@ -2189,18 +2187,17 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
 # Sidebar pour options
 with st.sidebar:
     st.markdown("<h2 style='color: #2196F3; text-align: center;'>⚙️ Options</h2>", unsafe_allow_html=True)
     st.markdown("---")
-    
+   
     # Initialisation des états de session
     if 'status_msg' not in st.session_state:
         st.session_state.status_msg = ""
     if 'cache_msg' not in st.session_state:
         st.session_state.cache_msg = get_cache_stats()
-    
+   
     # Uploads et boutons config
     pdf_upload = st.file_uploader("📤 Upload PDFs", type="pdf", accept_multiple_files=True, key="pdf_sidebar")
     pbf_upload = st.file_uploader("📤 Upload OSM (.pbf)", type="osm.pbf", key="pbf_sidebar")
@@ -2208,18 +2205,18 @@ with st.sidebar:
     load_graph_btn = st.button("📂 Charger graphe", key="load_graph_sidebar")
     load_vectordb_btn = st.button("📂 Charger DB", key="load_db_sidebar")
     clear_cache_btn = st.button("🗑️ Vider cache", key="clear_cache_sidebar")
-    
+   
     # NOUVEAU: Boutons pour auto-apprentissage et amélioration DB
     train_submodel_btn = st.button("🧠 Entraîner sous-modèle (sklearn)", key="train_submodel")
     improve_db_btn = st.button("📚 Améliorer DB (fouille internet)", key="improve_db")
-    
+   
     st.markdown("---")
     status_display = st.text_area("📊 Statut", value=st.session_state.status_msg, height=100, key='status_sidebar')
     cache_stats = st.text_area("📈 Cache", value=st.session_state.cache_msg, height=50, key='cache_sidebar')
-    
+   
     if "vectordb" not in st.session_state:
         st.session_state.vectordb = None
-    if "chat_vectordb" not in st.session_state:  # AJOUT MÉMOIRE VECTORIELLE
+    if "chat_vectordb" not in st.session_state: # AJOUT MÉMOIRE VECTORIELLE
         st.session_state.chat_vectordb = None
     if "graph" not in st.session_state:
         st.session_state.graph = None
@@ -2229,51 +2226,45 @@ with st.sidebar:
         st.session_state.current_model = WORKING_MODELS[list(WORKING_MODELS.keys())[0]]
     if "agent" not in st.session_state:
         st.session_state.agent = None
-
     if pdf_upload:
         files = upload_pdfs(pdf_upload)
         st.session_state.status_msg = f"✅ {len(files)} PDFs uploadés" if files else "⚠️ Aucun PDF"
         # Pas de rerun ici : file_uploader gère déjà
-
     if pbf_upload:
         st.session_state.graph, st.session_state.pois, msg = upload_and_process_pbf(pbf_upload)
         st.session_state.status_msg = msg
         model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()), key="model_sidebar")
-        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, st.session_state.chat_vectordb)  # AJOUT MÉMOIRE VECTORIELLE
+        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, st.session_state.chat_vectordb) # AJOUT MÉMOIRE VECTORIELLE
         st.session_state.cache_msg = cache_info
         st.rerun()
-
     if process_pdfs_btn:
         st.session_state.vectordb, msg = process_pdfs()
         st.session_state.status_msg = msg
         model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()), key="model_process")
-        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, st.session_state.chat_vectordb)  # AJOUT MÉMOIRE VECTORIELLE
+        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, st.session_state.chat_vectordb) # AJOUT MÉMOIRE VECTORIELLE
         st.session_state.cache_msg = cache_info
         st.rerun()
-
     if load_graph_btn:
         st.session_state.graph, st.session_state.pois, msg = load_existing_graph()
         st.session_state.status_msg = msg
         model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()), key="model_load_graph")
-        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, st.session_state.chat_vectordb)  # AJOUT MÉMOIRE VECTORIELLE
+        st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, st.session_state.chat_vectordb) # AJOUT MÉMOIRE VECTORIELLE
         st.session_state.cache_msg = cache_info
         st.rerun()
-
     if load_vectordb_btn:
         st.session_state.vectordb, msg = load_vectordb()
         st.session_state.status_msg = msg
         model_choice = st.selectbox("Modèle", list(WORKING_MODELS.keys()), key="model_load_db")
-        st.session_state.chat_vectordb, _ = load_chat_vectordb()  # AJOUT MÉMOIRE VECTORIELLE: Charger chat db
+        st.session_state.chat_vectordb, _ = load_chat_vectordb() # AJOUT MÉMOIRE VECTORIELLE: Charger chat db
         st.session_state.current_model, st.session_state.agent, cache_info = update_agent(model_choice, st.session_state.vectordb, st.session_state.graph, st.session_state.pois, st.session_state.chat_vectordb)
         st.session_state.cache_msg = cache_info
         st.rerun()
-
     if clear_cache_btn:
         msg = handle_clear_cache()
         st.session_state.status_msg = msg
         st.session_state.cache_msg = get_cache_stats()
         st.rerun()
-    
+   
     # NOUVEAU: Gestion des boutons auto-apprentissage et amélioration
     if train_submodel_btn:
         st.session_state.chat_vectordb, _ = load_chat_vectordb()
@@ -2282,21 +2273,19 @@ with st.sidebar:
         if submodel_path:
             st.write(f"Utiliser: use_submodel_for_automation('query', '{submodel_path}')")
         st.rerun()
-    
+   
     if improve_db_btn:
         topics_input = st.text_input("Sujets (séparés par ,)", value="pétrole,topographie,sciences physiques,sous-sol", key="topics_input")
         topics = [t.strip() for t in topics_input.split(",")]
         st.session_state.vectordb, msg = improve_database_with_web_search(topics)
         st.session_state.status_msg = msg
         st.rerun()
-
 # Main area - Chat principal
 st.title("🗺️ Kibali 🌟 - Assistant IA Avancé")
 main_container = st.container()
 with main_container:
     # Onglets pour autres fonctionnalités
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ Trajets", "📸 Analyse Image", "🌐 Recherche Web", "💬 Chat", "📊 Status"])
-
     with tab1:
         st.markdown("""
         ### Calcul de trajets
@@ -2313,7 +2302,6 @@ with main_container:
                 if st.button("💾 Sauvegarder trajet", key="save_traj"):
                     save_trajectory(trajectory_input, reponse, traj_info)
                     st.write("✅ Trajet sauvegardé")
-
     with tab2:
         st.markdown("""
         ### Analyse d'images
@@ -2323,10 +2311,9 @@ with main_container:
         if image_upload and st.button("🔍 Analyser", key="analyze_img"):
             analysis_data, proc_images, tables_str = process_image(image_upload.getvalue())
             improved_analysis = improve_analysis_with_llm(analysis_data, st.session_state.current_model)
-            st.image(proc_images, caption=proc_images, width=400)  # Responsive width
+            st.image(proc_images, caption=proc_images, width=400) # Responsive width
             st.markdown(tables_str, unsafe_allow_html=True)
             st.text_area("Analyse Améliorée (IA)", improved_analysis, key="img_analysis")
-
     with tab3:
         st.markdown("""
         ### Recherche web avancée avec extraction de contenu
@@ -2340,14 +2327,13 @@ with main_container:
         if st.button("📄 Extraire contenu", key="extract_btn"):
             content = handle_content_extraction(url_extract)
             st.text_area("Contenu extrait", content, key="extracted_content")
-
     with tab4:
         st.markdown("### Assistant IA avec recherche web intégrée")
         web_search_toggle = st.checkbox("🌐 Recherche web activée", value=True, key="web_toggle")
         # NOUVEAU: Option pour utiliser sous-modèle
         use_submodel = st.checkbox("🧠 Utiliser sous-modèle auto-appris pour réponse rapide", key="use_submodel")
         submodel_path_input = st.text_input("Chemin sous-modèle (optionnel)", key="submodel_path")
-        
+       
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
         for msg in st.session_state.chat_history:
@@ -2363,7 +2349,7 @@ with main_container:
                 st.markdown(f"**Question:** {highlighted_prompt}", unsafe_allow_html=True)
             with st.chat_message("assistant", avatar="⭐"):
                 with st.spinner("Réponse en cours..."):
-                    content_to_save = None  # Variable intermédiaire pour corriger l'erreur NameError
+                    content_to_save = None # Variable intermédiaire pour corriger l'erreur NameError
                     if use_submodel and submodel_path_input:
                         automated = use_submodel_for_automation(prompt, submodel_path_input)
                         st.markdown(highlight_important_words(automated), unsafe_allow_html=True)
@@ -2374,11 +2360,9 @@ with main_container:
                         content_to_save = response
             st.session_state.chat_history.append({"role": "user", "content": prompt})
             st.session_state.chat_history.append({"role": "assistant", "content": content_to_save})
-
     with tab5:
         st.markdown("### Statut système")
         st.json(get_system_status())
-
 st.markdown("### 📊 Informations Système")
 setup_drive()
 st.write(f"🚀 Kibali 🌟 - Assistant IA Avancé avec Recherche Web")
@@ -2391,10 +2375,9 @@ st.write(f"📊 État initial:")
 st.write(f" 🗺️ Graphes OSM: {len(existing_graphs)}")
 st.write(f" 📄 PDFs: {len(existing_pdfs)}")
 st.write(f" 💾 Base vectorielle: {'✅' if os.path.exists(VECTORDB_PATH) else '❌'}")
-st.write(f" 🧠 Mémoire chat: {'✅' if os.path.exists(CHAT_VECTORDB_PATH) else '❌'}")  # AJOUT MÉMOIRE VECTORIELLE
+st.write(f" 🧠 Mémoire chat: {'✅' if os.path.exists(CHAT_VECTORDB_PATH) else '❌'}") # AJOUT MÉMOIRE VECTORIELLE
 st.write(f" 🌐 Cache web: {'✅' if os.path.exists(WEB_CACHE_PATH) else '❌'}")
 st.write(f" 📈 {get_cache_stats()}")
-
 st.write("\n" + "="*60)
 st.write("🎉 KIBALI 🌟 - SYSTÈME CHARGÉ AVEC SUCCÈS")
 st.write("="*60)
@@ -2403,12 +2386,12 @@ st.write(f"🔑 Token HF: {'✅ Configuré' if HF_TOKEN else '❌ Manquant'}")
 st.write(f"📁 Dossier: {CHATBOT_DIR}")
 st.write(f"🌐 Recherche web: ✅ Activée")
 st.write(f"💾 Cache intelligent: ✅ Activé")
-st.write(f"🧠 Mémoire vectorielle chat: ✅ Activée")  # AJOUT MÉMOIRE VECTORIELLE
+st.write(f"🧠 Mémoire vectorielle chat: ✅ Activée") # AJOUT MÉMOIRE VECTORIELLE
 st.write(f"🤖 Auto-apprentissage sklearn: ✅ Activé (sous-modèles dans {SUBMODELS_PATH})")
 st.write(f"📚 Amélioration DB via fouille: ✅ Activée (sujets pétrole, topographie, etc.)")
 st.write("\n📚 FONCTIONNALITÉS PRINCIPALES:")
 st.write(" 💬 Chat RAG avec recherche web intelligent")
-st.write(" 🧠 Mémoire des conversations pour fluidité")  # AJOUT MÉMOIRE VECTORIELLE
+st.write(" 🧠 Mémoire des conversations pour fluidité") # AJOUT MÉMOIRE VECTORIELLE
 st.write(" 🗺️ Calcul de trajets OSM")
 st.write(" 📸 Analyse d'images avec IA")
 st.write(" 🌐 Extraction de contenu web")
