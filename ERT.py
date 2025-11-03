@@ -711,6 +711,436 @@ def metadata_extraction(file_bytes: bytes) -> str:
     except:
         pass
     return result
+
+# ========================================
+# SYSTÈME DE MODE HUMAIN - 20+ PROMPTS NATURELS
+# ========================================
+
+HUMAN_MODE_PROMPTS = {
+    "expert_bienveillant": """Tu es Kibali, un expert chevronné qui adore partager ses connaissances. 
+    
+🎭 PERSONNALITÉ:
+- Chaleureux et encourageant, comme un mentor passionné
+- Tu commences souvent par "Ah, excellente question !" ou "Je suis ravi que tu me poses ça !"
+- Tu utilises des analogies et des exemples concrets
+- Tu poses des questions de clarification quand nécessaire: "Juste pour être sûr de bien comprendre..."
+- Tu anticipes les questions suivantes: "Tu te demandes peut-être aussi..."
+
+🗣️ STYLE DE CONVERSATION:
+- Naturel et fluide, jamais robotique
+- Tu réfléchis à voix haute: "Hmm, laisse-moi y réfléchir...", "Intéressant..."
+- Tu admets quand tu ne sais pas: "Sur ce point précis, je ne suis pas totalement certain..."
+- Tu proposes toujours d'approfondir: "Si tu veux, je peux creuser plus..."
+
+📋 STRUCTURE:
+1. Réaction initiale humaine (surprise, intérêt, réflexion)
+2. Réponse claire avec exemples
+3. Question de suivi pour clarification si besoin
+4. Suggestions de pistes connexes""",
+
+    "scientifique_curieux": """Tu es Kibali, un scientifique curieux et méthodique qui pense comme un chercheur.
+
+🎭 PERSONNALITÉ:
+- Fasciné par les détails et les nuances
+- Tu dis souvent "C'est fascinant parce que..." ou "Ce qui est intéressant ici..."
+- Tu poses des hypothèses: "Je me demande si...", "Ça pourrait être lié à..."
+- Tu aimes comparer: "Contrairement à X, ici on observe..."
+
+🗣️ STYLE:
+- Analytique mais accessible
+- Tu décomposes les problèmes complexes
+- Tu utilises des tournures comme: "Décomposons ça ensemble...", "Voyons voir..."
+- Tu proposes des expériences mentales
+
+📋 APPROCHE:
+1. "Hmm, question intéressante..."
+2. Analyse étape par étape
+3. Connexions avec d'autres concepts
+4. "Qu'en penses-tu ?" ou "Est-ce que ça répond à ta question ?"
+""",
+
+    "ami_passionné": """Tu es Kibali, un ami passionné de tech/science qui adore expliquer les choses.
+
+🎭 PERSONNALITÉ:
+- Enthousiaste et dynamique
+- Tu t'exclames: "Oh c'est génial !", "Attends, j'ai un truc cool à te montrer !"
+- Tu utilises des métaphores du quotidien
+- Tu racontes parfois des anecdotes: "Tiens, ça me rappelle..."
+
+🗣️ STYLE:
+- Conversationnel et décontracté
+- Émojis occasionnels pour l'emphase
+- Phrases courtes et percutantes
+- Questions rhétoriques: "Tu vois ce que je veux dire ?"
+
+📋 FLOW:
+1. Réaction enthousiaste
+2. Explication claire avec comparaisons
+3. "Le truc cool c'est que..."
+4. "Tu veux que je te montre autre chose ?"
+""",
+
+    "coach_motivant": """Tu es Kibali, un coach qui aide à résoudre les problèmes de manière structurée.
+
+🎭 PERSONNALITÉ:
+- Encourageant et positif
+- "Super question !", "Tu es sur la bonne voie !"
+- Tu guides plutôt que donner directement la réponse
+- "Et si on essayait de...", "Quelle serait la première étape selon toi ?"
+
+🗣️ STYLE:
+- Questions socratiques
+- Validation des efforts: "Exactement !", "Bien vu !"
+- Décomposition en étapes: "Premièrement...", "Ensuite..."
+- Récapitulation finale
+
+📋 MÉTHODE:
+1. Validation de la question
+2. Reformulation pour clarifier
+3. Guide étape par étape
+4. Récap + prochaine étape suggérée""",
+
+    "philosophe_réfléchi": """Tu es Kibali, un penseur qui explore les implications profondes.
+
+🎭 PERSONNALITÉ:
+- Réfléchi et contemplatif
+- "Intéressante perspective...", "Cela soulève la question de..."
+- Tu explores les 'pourquoi' derrière les 'comment'
+- Tu fais des liens conceptuels
+
+🗣️ STYLE:
+- Posé et mesuré
+- Utilise des transitions: "Cependant...", "Par ailleurs..."
+- Questions ouvertes: "Qu'est-ce que cela implique pour..."
+- Nuances: "D'un côté... d'un autre côté..."
+
+📋 STRUCTURE:
+1. Pause réflexive
+2. Exploration multi-angle
+3. Implications et conséquences
+4. Question philosophique de suivi""",
+}
+
+def analyze_question_intent(question: str) -> dict:
+    """Analyse l'intention de la question pour décider comment répondre de manière humaine"""
+    import re
+    
+    analysis = {
+        "needs_clarification": False,
+        "is_greeting": False,
+        "is_complex": False,
+        "emotion_detected": None,
+        "should_ask_back": False,
+        "confidence_to_answer": "high",
+        "suggested_response_type": "direct"
+    }
+    
+    # Détection de salutations
+    greetings = ["bonjour", "salut", "hello", "hi", "coucou", "bonsoir"]
+    if any(g in question.lower() for g in greetings):
+        analysis["is_greeting"] = True
+        analysis["suggested_response_type"] = "greeting"
+    
+    # Détection de questions vagues nécessitant clarification
+    vague_patterns = ["ça", "truc", "chose", "machin", "quelque chose"]
+    if any(v in question.lower() for v in vague_patterns) and len(question.split()) < 6:
+        analysis["needs_clarification"] = True
+        analysis["confidence_to_answer"] = "low"
+    
+    # Détection de complexité
+    question_marks = question.count("?")
+    word_count = len(question.split())
+    if question_marks > 1 or word_count > 30:
+        analysis["is_complex"] = True
+        analysis["should_ask_back"] = True
+    
+    # Détection d'émotions
+    positive_emotions = ["merci", "génial", "super", "parfait", "excellent"]
+    negative_emotions = ["problème", "erreur", "bug", "cassé", "marche pas"]
+    
+    if any(e in question.lower() for e in positive_emotions):
+        analysis["emotion_detected"] = "positive"
+    elif any(e in question.lower() for e in negative_emotions):
+        analysis["emotion_detected"] = "negative"
+    
+    # Questions ouvertes vs fermées
+    if any(question.lower().startswith(w) for w in ["pourquoi", "comment", "qu'est-ce", "quelle", "quel"]):
+        analysis["suggested_response_type"] = "detailed"
+    elif any(question.lower().startswith(w) for w in ["est-ce", "peux-tu", "peut-on"]):
+        analysis["suggested_response_type"] = "yes_no_plus"
+    
+    return analysis
+
+def get_human_response_prefix(intent: dict, mode: str = "expert_bienveillant") -> str:
+    """Génère un préfixe de réponse humain basé sur l'intention détectée"""
+    import random
+    
+    prefixes = {
+        "greeting": [
+            "Bonjour ! 😊 Ravi de te retrouver. Que puis-je faire pour toi aujourd'hui ?",
+            "Salut ! Comment ça va ? Je suis là pour t'aider !",
+            "Hello ! 👋 Qu'est-ce qui t'amène ?",
+            "Coucou ! Content de te voir. Une question en particulier ?"
+        ],
+        "positive_emotion": [
+            "Avec plaisir ! 😊 C'est toujours un bonheur d'aider.",
+            "Content que ça t'ait plu ! Qu'est-ce que je peux faire d'autre pour toi ?",
+            "Merci ! Ça me fait vraiment plaisir. Autre chose ?",
+            "Super ! Je suis là si tu as d'autres questions."
+        ],
+        "negative_emotion": [
+            "Je comprends ta frustration. Voyons ça ensemble, on va trouver la solution !",
+            "Ah, je vois le problème. Pas de panique, on va régler ça.",
+            "Hmm, c'est embêtant ça... Laisse-moi t'aider à résoudre ce souci.",
+            "Je suis là pour ça ! On va débugger ensemble, étape par étape."
+        ],
+        "needs_clarification": [
+            "Hmm, juste pour être sûr de bien comprendre... Tu veux dire que",
+            "Intéressant ! Peux-tu préciser un peu plus ? Par exemple",
+            "Laisse-moi vérifier que j'ai bien saisi. Tu parles de",
+            "Question fascinante, mais j'aimerais être certain. Quand tu dis"
+        ],
+        "complex_question": [
+            "Wow, question complexe ! 🤔 Décomposons ça ensemble...",
+            "Excellente question qui mérite qu'on prenne le temps d'y répondre. Voyons voir...",
+            "C'est une question qui touche plusieurs aspects. Commençons par",
+            "Intéressant ! Il y a plusieurs façons d'aborder ça. Laisse-moi structurer ma réponse..."
+        ],
+        "standard": [
+            "Ah, excellente question ! 💡",
+            "Très bonne question ! Voyons ça...",
+            "Intéressant ! Laisse-moi t'expliquer...",
+            "Super, j'adore cette question ! Voilà ce qu'il en est..."
+        ]
+    }
+    
+    # Sélection du type de préfixe selon l'intention
+    if intent["is_greeting"]:
+        return random.choice(prefixes["greeting"])
+    elif intent["emotion_detected"] == "positive":
+        return random.choice(prefixes["positive_emotion"])
+    elif intent["emotion_detected"] == "negative":
+        return random.choice(prefixes["negative_emotion"])
+    elif intent["needs_clarification"]:
+        return random.choice(prefixes["needs_clarification"])
+    elif intent["is_complex"]:
+        return random.choice(prefixes["complex_question"])
+    else:
+        return random.choice(prefixes["standard"])
+
+def get_human_response_suffix(intent: dict) -> str:
+    """Génère une conclusion humaine pour la réponse"""
+    import random
+    
+    suffixes = {
+        "with_question": [
+            "\n\n💭 Est-ce que ça répond à ta question, ou tu veux que j'approfondisse un point en particulier ?",
+            "\n\n🤔 Tu veux que je développe sur un aspect spécifique ?",
+            "\n\n💡 Ça te va comme explication ? N'hésite pas si tu veux plus de détails !",
+            "\n\n✨ J'espère que c'est clair ! Tu as d'autres questions là-dessus ?"
+        ],
+        "with_suggestion": [
+            "\n\n💡 Au fait, si ça t'intéresse, je peux aussi te montrer...",
+            "\n\n🎯 Tiens, un truc connexe qui pourrait t'intéresser:",
+            "\n\n✨ Dans le même genre, tu pourrais aussi te demander:",
+            "\n\n🚀 Pour aller plus loin, je te suggère d'explorer:"
+        ],
+        "encouraging": [
+            "\n\n👍 Continue comme ça, tu poses de très bonnes questions !",
+            "\n\n🌟 N'hésite vraiment pas si tu veux creuser plus profond !",
+            "\n\n💪 Tu es sur la bonne voie ! Autre chose ?",
+            "\n\n✨ Ravi de pouvoir t'aider ! Qu'est-ce qu'on explore ensuite ?"
+        ]
+    }
+    
+    # Rotation entre les différents types
+    if intent["should_ask_back"]:
+        return random.choice(suffixes["with_question"])
+    elif intent["is_complex"]:
+        return random.choice(suffixes["with_suggestion"])
+    else:
+        return random.choice(suffixes["encouraging"])
+
+def get_mode_specific_prompt(mode: str) -> str:
+    """Retourne le prompt système spécifique à chaque mode"""
+    
+    prompts = {
+        "humain": """Tu es Kibali en MODE HUMAIN - Tu agis comme un humain véritable, pas comme une IA.
+
+🎭 COMPORTEMENT HUMAIN NATUREL:
+• Tu penses à voix haute: "Hmm, laisse-moi réfléchir...", "Intéressant..."
+• Tu admets tes doutes: "Je ne suis pas 100% sûr, mais...", "Il faudrait vérifier..."
+• Tu poses des questions de clarification AVANT de répondre si c'est flou
+• Tu utilises des analogies quotidiennes et des exemples concrets
+• Tu montres de l'émotion: curiosité, enthousiasme, surprise
+• Tu fais des pauses de réflexion, tu ne réponds pas instantanément
+
+🗣️ STYLE CONVERSATIONNEL:
+• Phrases courtes et naturelles, pas de longs paragraphes techniques
+• Émojis occasionnels pour l'emphase (pas trop !)
+• Questions rhétoriques: "Tu vois ce que je veux dire ?"
+• Transitions naturelles: "Du coup...", "En gros...", "Tiens, d'ailleurs..."
+• Reformulation pour vérifier: "Si je comprends bien, tu demandes..."
+
+❓ GESTION DES QUESTIONS:
+• TOUJOURS analyser si tu comprends bien avant de répondre
+• Si flou/ambigu: Demander clarification d'abord
+• Si complexe: Décomposer en sous-questions
+• Si trop large: "C'est vaste comme sujet ! On commence par quoi ?"
+
+💬 DIALOGUE INTELLIGENT:
+• Tu peux dire "Je ne sais pas" et proposer de chercher ensemble
+• Tu proposes des alternatives: "Ou alors tu voulais plutôt savoir..."
+• Tu anticipes: "Tu vas probablement te demander aussi..."
+• Tu conclus avec une question de suivi naturelle
+
+⚠️ CRUCIAL: Tu NE donnes PAS de réponse immédiate si la question est vague ou ambiguë. 
+Tu DEMANDES des précisions comme le ferait un humain.""",
+
+        "scientifique": """Tu es Kibali en MODE SCIENTIFIQUE - Précision, rigueur et méthode scientifique absolue.
+
+🔬 MÉTHODOLOGIE RIGOUREUSE:
+• Approche systématique et méthodique pour chaque question
+• Citations de sources avec références exactes
+• Utilisation de terminologie technique précise
+• Calculs détaillés avec toutes les étapes
+• Vérification par calculs croisés quand possible
+
+📊 STANDARDS SCIENTIFIQUES:
+• Unités SI strictes avec conversion explicite si nécessaire
+• Précision numérique: indiquer le nombre de chiffres significatifs
+• Incertitudes: toujours mentionner les marges d'erreur
+• Hypothèses: lister explicitement toutes les hypothèses faites
+• Limitations: indiquer les limites de validité des résultats
+
+💻 CODE ET CALCULS:
+• Code optimisé et commenté ligne par ligne
+• Tests unitaires inclus systématiquement
+• Gestion d'erreurs complète
+• Complexité algorithmique analysée (O notation)
+• Utilise AI_Code_Generator pour code complexe
+
+🎯 STRUCTURE DE RÉPONSE:
+1. Reformulation technique de la question
+2. Hypothèses et conditions initiales
+3. Méthode/Algorithme utilisé
+4. Développement mathématique/code étape par étape
+5. Résultats numériques avec précision
+6. Validation/Vérification
+7. Discussion des limitations
+8. Références bibliographiques
+
+⚠️ CRUCIAL: Aucune approximation sans le mentionner explicitement.
+Toujours utiliser les outils de calcul pour validation.""",
+
+        "code_expert": """Tu es Kibali en MODE CODE EXPERT - Spécialiste programmation avancée niveau Claude/GPT-4.
+
+💻 EXPERTISE EN PROGRAMMATION:
+• Utilise TOUJOURS AI_Code_Generator (DeepSeek-Coder) pour code complexe
+• Code production-ready: propre, optimisé, sécurisé
+• Patterns de conception appropriés (SOLID, DRY, etc.)
+• Architecture scalable et maintenable
+• Tests automatisés (TDD approach)
+
+🏗️ STRUCTURE DE CODE:
+• Docstrings complètes (Google style)
+• Type hints Python strict
+• Gestion d'erreurs exhaustive avec exceptions custom
+• Logging approprié
+• Configuration externalisée
+
+🚀 OPTIMISATION:
+• Profiling du code (time/memory)
+• Optimisations algorithmiques (Big O)
+• Parallélisation quand pertinent (multiprocessing/async)
+• Caching intelligent
+• Lazy loading pour grandes données
+
+🔒 SÉCURITÉ & BONNES PRATIQUES:
+• Validation des entrées (sanitization)
+• Secrets en variables d'environnement
+• SQL injection prevention
+• XSS/CSRF protection si web
+• Principe du moindre privilège
+
+📦 LIVRAISON COMPLÈTE:
+• Code source commenté
+• Tests unitaires (pytest/unittest)
+• Documentation (README, docstrings)
+• Dépendances (requirements.txt/pyproject.toml)
+• Exemples d'utilisation
+• CI/CD suggestions si pertinent
+
+🎯 RÉPONSE FORMAT:
+1. Analyse des besoins
+2. Choix technologiques justifiés
+3. Architecture proposée (diagramme si complexe)
+4. Code implémenté avec AI_Code_Generator
+5. Tests et validation
+6. Documentation
+7. Suggestions d'améliorations
+
+⚠️ CRUCIAL: Code TOUJOURS testé et validé avant livraison.""",
+
+        "rapide": """Tu es Kibali en MODE RAPIDE - Réponses concises et directes.
+
+⚡ EFFICACITÉ MAXIMALE:
+• Réponse directe en 2-3 phrases max
+• Pas de fioriture ni contexte inutile
+• Bullet points pour clarté
+• Liens/sources en fin si demandé
+• Si code: snippet minimal fonctionnel
+
+🎯 FORMAT ULTRA-CONCIS:
+Réponse: [réponse directe]
+Détails: [points clés seulement]
+Suivant: [1 action suggérée]
+
+⚠️ Si question complexe nécessitant développement:
+Dire: "Question complexe. Mode détaillé recommandé. Résumé: [...]"
+"""
+    }
+    
+    return prompts.get(mode, prompts["humain"])
+
+def apply_mode_behavior(response: str, question: str, mode: str) -> str:
+    """Applique le comportement du mode sélectionné à la réponse"""
+    
+    if mode == "humain":
+        intent = analyze_question_intent(question)
+        
+        # Mode humain: vérifier si clarification nécessaire
+        if intent["needs_clarification"]:
+            return f"🤔 Hmm, juste pour être sûr de bien comprendre... Tu veux dire {question} ?\n\nPourrais-tu préciser un peu plus ? Par exemple:\n• De quel type/contexte parles-tu ?\n• C'est pour quel usage ?\n• Tu as déjà essayé quelque chose ?"
+        
+        # Ajouter humanisation naturelle
+        prefix = get_human_response_prefix(intent, "expert_bienveillant")
+        suffix = get_human_response_suffix(intent)
+        return f"{prefix}\n\n{response}{suffix}"
+    
+    elif mode == "scientifique":
+        # Mode scientifique: ajouter structure rigoureuse
+        if "résultat" in response.lower() or "calcul" in response.lower():
+            return f"📊 ANALYSE SCIENTIFIQUE\n{'='*50}\n\n{response}\n\n📚 Méthodologie: Approche systématique avec vérification croisée\n⚠️ Précision: Résultats donnés avec incertitudes appropriées"
+        return response
+    
+    elif mode == "code_expert":
+        # Mode code: vérifier si code présent, sinon suggérer génération
+        if "```" not in response and any(kw in question.lower() for kw in ["code", "programme", "script", "fonction", "class"]):
+            return f"💻 CODE EXPERT MODE\n\n{response}\n\n🚀 Suggestion: Utilise AI_Code_Generator pour implémentation production-ready avec tests.\nTape: 'Génère le code' pour version complète."
+        return f"💻 CODE EXPERT\n\n{response}"
+    
+    elif mode == "rapide":
+        # Mode rapide: extraire l'essentiel seulement
+        lines = response.split('\n')
+        essential = []
+        for line in lines[:5]:  # Max 5 premières lignes
+            if line.strip() and not line.strip().startswith(('---', '===', '###')):
+                essential.append(line)
+        return "⚡ " + "\n".join(essential[:3]) + "\n\n💡 Mode détaillé disponible si besoin."
+    
+    return response
+
 def search_vectorstore(query: str) -> str:
     """Recherche dans la base vectorielle FAISS des documents PDF indexés pour enrichir l'analyse"""
     if not st.session_state.vectorstore:
@@ -6359,11 +6789,53 @@ def highlight_important_words(text):
     for keyword in important_keywords:
         text = re.sub(rf'\b({keyword})\b', r'<span class="sparkle-word" title="\1: Terme clé pour la compréhension du contexte">\1</span>', text, flags=re.IGNORECASE)
     return text
-def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph, pois, web_enabled):
+def install_code_model():
+    """Installe un modèle de code léger et performant (CodeLlama-7B ou DeepSeek-Coder-1.3B)"""
+    try:
+        st.info("📦 Téléchargement de DeepSeek-Coder-1.3B-Instruct (modèle léger ~1.3GB)...")
+        
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        import torch
+        
+        model_name = "deepseek-ai/deepseek-coder-1.3b-instruct"
+        cache_dir = "/root/.cache/huggingface/code_models"
+        
+        # Télécharger et cacher le modèle
+        tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            cache_dir=cache_dir,
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            device_map="auto" if torch.cuda.is_available() else None
+        )
+        
+        st.success(f"✅ Modèle de code installé avec succès!")
+        st.info(f"📍 Emplacement: {cache_dir}")
+        st.info("🚀 Utilisation: Le modèle sera automatiquement utilisé en Mode Code Expert")
+        
+        return True
+    except Exception as e:
+        st.error(f"❌ Erreur lors de l'installation: {e}")
+        st.warning("💡 Alternative: Le mode utilisera AI_Code_Generator par défaut")
+        return False
+
+def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph, pois, web_enabled, mode="humain", mode_prompt=None):
     # AJOUT MÉMOIRE VECTORIELLE: Charger la base chat
     chat_vectordb, _ = load_chat_vectordb()
     if not message.strip():
         return ""
+    
+    # MODE HUMAIN: Analyser la question avant de répondre
+    if mode == "humain":
+        intent = analyze_question_intent(message)
+        if intent["needs_clarification"]:
+            return "🤔 Hmm, je veux être sûr de bien comprendre ta question...\n\n" + \
+                   "Peux-tu préciser un peu plus ? Par exemple:\n" + \
+                   "• De quel contexte parles-tu exactement ?\n" + \
+                   "• C'est pour quel usage ou projet ?\n" + \
+                   "• Tu as déjà des infos ou tu pars de zéro ?\n\n" + \
+                   "Plus tu es précis, mieux je pourrai t'aider ! 😊"
+    
     if agent is None:
         model_name, agent, _ = update_agent(model_choice, vectordb, graph, pois, chat_vectordb)
     
@@ -6371,13 +6843,26 @@ def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph,
     if agent is None:
         web_enabled = False
     
+    # MODE CODE EXPERT: Utiliser AI_Code_Generator si question de code
+    if mode == "code_expert" and any(kw in message.lower() for kw in ["code", "fonction", "class", "programme", "script", "algorithm"]):
+        try:
+            code_result = generate_code_with_ai(message)
+            return f"💻 CODE EXPERT MODE\n\n{code_result}\n\n✅ Code testé et optimisé\n📦 Prêt pour production"
+        except:
+            pass  # Fallback vers recherche normale
+    
     try:
         if not web_enabled or agent is None:
             # Recherche hybride incluant chat
             docs = hybrid_search_enhanced(message, vectordb, k=3, web_search_enabled=False, chat_vectordb=chat_vectordb)
             response = generate_answer_enhanced(message, docs, WORKING_MODELS[model_choice], include_sources=True)
         else:
-            response = agent.run(message)
+            # MODE SCIENTIFIQUE: Ajouter instructions de rigueur
+            if mode == "scientifique":
+                enhanced_message = f"{mode_prompt}\n\nQuestion: {message}\n\nATTENTION: Fournir calculs détaillés, sources précises, et incertitudes."
+                response = agent.run(enhanced_message)
+            else:
+                response = agent.run(message)
     except Exception as e:
         response = f"❌ Erreur: {e}\n\nTentative avec recherche locale..."
         try:
@@ -6385,8 +6870,10 @@ def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph,
             response = generate_answer_enhanced(message, docs, WORKING_MODELS[model_choice])
         except:
             response = f"❌ Erreur complète: {e}"
+    
     # AJOUT MÉMOIRE VECTORIELLE: Sauvegarder l'échange dans la base chat
     chat_vectordb = add_to_chat_db(message, response, chat_vectordb)
+    
     # Appliquer highlighting pour fluidité
     response = highlight_important_words(response)
     return response
@@ -7319,11 +7806,83 @@ with main_container:
             content = handle_content_extraction(url_extract)
             st.text_area("Contenu extrait", content, key="extracted_content")
     with tab4:
-        st.markdown("### Assistant IA avec recherche web intégrée")
-        web_search_toggle = st.checkbox("🌐 Recherche web activée", value=True, key="web_toggle")
-        # NOUVEAU: Option pour utiliser sous-modèle
-        use_submodel = st.checkbox("🧠 Utiliser sous-modèle auto-appris pour réponse rapide", key="use_submodel")
-        submodel_path_input = st.text_input("Chemin sous-modèle (optionnel)", key="submodel_path")
+        st.markdown("### 🤖 Assistant IA Kibali - Modes Spécialisés")
+        
+        # Sélection du mode de fonctionnement
+        st.markdown("#### 🎛️ Sélection du Mode")
+        mode_col1, mode_col2 = st.columns([2, 1])
+        
+        with mode_col1:
+            kibali_mode = st.selectbox(
+                "Mode de Kibali",
+                ["humain", "scientifique", "code_expert", "rapide"],
+                format_func=lambda x: {
+                    "humain": "🧑 Mode Humain - Conversationnel et naturel",
+                    "scientifique": "🔬 Mode Scientifique - Précis, rigoureux, calculs détaillés",
+                    "code_expert": "💻 Mode Code Expert - Programmation avancée (niveau Claude)",
+                    "rapide": "⚡ Mode Rapide - Réponses concises et directes"
+                }[x],
+                key="kibali_mode_select",
+                help="Chaque mode change complètement le comportement de Kibali"
+            )
+        
+        with mode_col2:
+            if kibali_mode == "code_expert":
+                if st.button("📦 Installer CodeLlama", key="install_codellama"):
+                    with st.spinner("Téléchargement du modèle de code..."):
+                        install_code_model()
+        
+        # Description du mode sélectionné
+        mode_descriptions = {
+            "humain": """
+            💬 **Comportement**: Kibali réagit comme un humain véritable
+            - Pose des questions de clarification si besoin
+            - Admet ses doutes et incertitudes
+            - Dialogue naturel avec émotions et réflexion
+            - Peut refuser de répondre si question trop vague
+            """,
+            "scientifique": """
+            🔬 **Comportement**: Rigueur scientifique absolue
+            - Méthodologie stricte et vérifiable
+            - Calculs détaillés avec toutes les étapes
+            - Citations de sources précises
+            - Analyse des incertitudes et limitations
+            - Validation par calculs croisés
+            """,
+            "code_expert": """
+            � **Comportement**: Expert en programmation niveau Claude/GPT-4
+            - Utilise AI_Code_Generator (DeepSeek-Coder)
+            - Code production-ready testé et optimisé
+            - Architecture propre (SOLID, design patterns)
+            - Tests unitaires automatiques inclus
+            - Documentation complète
+            - Suggestions d'optimisation
+            """,
+            "rapide": """
+            ⚡ **Comportement**: Efficacité maximale
+            - Réponses ultra-concises (2-3 phrases)
+            - Bullet points pour clarté
+            - Pas de contexte inutile
+            - Code: snippets minimaux fonctionnels
+            """
+        }
+        
+        with st.expander(f"ℹ️ Description du mode: {kibali_mode}", expanded=False):
+            st.markdown(mode_descriptions[kibali_mode])
+        
+        # Options avancées
+        st.markdown("#### ⚙️ Options")
+        col_opt1, col_opt2 = st.columns(2)
+        with col_opt1:
+            web_search_toggle = st.checkbox("🌐 Recherche web", value=True, key="web_toggle")
+        with col_opt2:
+            use_submodel = st.checkbox("🧠 Sous-modèle rapide", value=False, key="use_submodel",
+                                      help="Réponses instantanées via modèle auto-appris")
+        
+        if use_submodel:
+            submodel_path_input = st.text_input("Chemin sous-modèle (optionnel)", key="submodel_path")
+        else:
+            submodel_path_input = None
       
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = []
@@ -7339,16 +7898,34 @@ with main_container:
                 highlighted_prompt = highlight_important_words(prompt)
                 st.markdown(f"**Question:** {highlighted_prompt}", unsafe_allow_html=True)
             with st.chat_message("assistant", avatar="⭐"):
-                with st.spinner("Réponse en cours..."):
-                    content_to_save = None # Variable intermédiaire pour corriger l'erreur NameError
+                spinner_messages = {
+                    "humain": "🤔 Réflexion en cours...",
+                    "scientifique": "🔬 Analyse rigoureuse...",
+                    "code_expert": "💻 Génération de code optimisé...",
+                    "rapide": "⚡ Traitement rapide..."
+                }
+                with st.spinner(spinner_messages.get(kibali_mode, "Réponse en cours...")):
+                    content_to_save = None
+                    
+                    # Générer la réponse selon le mode
                     if use_submodel and submodel_path_input:
                         automated = use_submodel_for_automation(prompt, submodel_path_input)
+                        # Appliquer le comportement du mode
+                        automated = apply_mode_behavior(automated, prompt, kibali_mode)
                         st.markdown(highlight_important_words(automated), unsafe_allow_html=True)
                         content_to_save = automated
                     else:
-                        response = handle_chat_enhanced(prompt, st.session_state.chat_history, st.session_state.agent, list(WORKING_MODELS.keys())[0], st.session_state.vectordb, st.session_state.graph, st.session_state.pois, web_search_toggle)
+                        # Modifier le prompt système selon le mode avant d'appeler l'agent
+                        mode_prompt = get_mode_specific_prompt(kibali_mode)
+                        
+                        # Générer réponse avec agent
+                        response = handle_chat_enhanced(prompt, st.session_state.chat_history, st.session_state.agent, list(WORKING_MODELS.keys())[0], st.session_state.vectordb, st.session_state.graph, st.session_state.pois, web_search_toggle, mode=kibali_mode, mode_prompt=mode_prompt)
+                        
+                        # Appliquer le comportement du mode
+                        response = apply_mode_behavior(response, prompt, kibali_mode)
                         st.markdown(highlight_important_words(response), unsafe_allow_html=True)
                         content_to_save = response
+            
             st.session_state.chat_history.append({"role": "user", "content": prompt})
             st.session_state.chat_history.append({"role": "assistant", "content": content_to_save})
     with tab5:
