@@ -29,3 +29,70 @@ __pycache__/
 # OS spécifiques
 .DS_Store
 Thumbs.db
+
+# Virtual Environments
+venv/
+env/
+ENV/
+kibali_env/
+kibanalyse-env/
+musicgen_cuda12_env/
+musicgen_cuda13_env/
+pytorch_env/
+
+# Models and Large Files
+*.pt
+*.pth
+*.bin
+*.onnx
+*.h5
+*.safetensors
+yolov8n.pt
+
+# Data files
+*.npy
+*.npz
+*.dat
+calibration_image_sample_data_20x128x128x3_float32.npy
+
+# Cache
+.cache/
+*.faiss
+faiss_index/
+vectorstore/
+chroma/
+
+# Temporary files
+*.tmp
+*.temp
+*.backup
+*.bak
+
+# PDF Reports (generated)
+*_RAPPORT_COMPLET_ERT.pdf
+*_ert_graphics*.png
+*_ert_graphics.pdf
+*_grid_ert.pkl
+*_correspondances*.csv
+*_correspondances*.pdf
+*_correspondances*.png
+
+# Build directories
+LGMBUILD/
+usd_build/
+Kibalone/
+CUDAV/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# Conda
+miniconda3/
