@@ -50,8 +50,16 @@ import time
 import shutil
 # AI Code Agent pour exécution autonome de code
 from ai_code_agent import AICodeAgent
-# Voice Agent pour transcription et synthèse vocale
-from voice_agent import VoiceAgent, StreamingVoiceAgent
+# Voice Agent pour transcription et synthèse vocale (import optionnel)
+try:
+    from voice_agent import VoiceAgent, StreamingVoiceAgent
+    VOICE_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ Voice Agent non disponible: {e}")
+    print("💡 Pour activer le mode vocal, installez: pip install sounddevice soundfile librosa")
+    VoiceAgent = None
+    StreamingVoiceAgent = None
+    VOICE_AVAILABLE = False
 # Optimisation CPU - Limiter les threads torch
 torch.set_num_threads(4)  # Maximum 4 threads pour éviter surchauffe
 # Note: set_num_interop_threads retiré car cause RuntimeError si appelé après init parallèle
@@ -7886,67 +7894,74 @@ with st.sidebar:
     improve_db_btn = st.button("📚 Améliorer DB (fouille internet)", key="improve_db")
   
     # 🎤 SECTION VOCALE
-    st.markdown("---")
-    st.markdown("#### 🎤 Interface Vocale")
-    
-    voice_enable_checkbox = st.checkbox(
-        "Activer le mode vocal",
-        value=st.session_state.get("voice_enabled", False),
-        key="voice_enable_checkbox",
-        help="Active la transcription et synthèse vocale"
-    )
-    
-    if voice_enable_checkbox != st.session_state.get("voice_enabled", False):
-        st.session_state.voice_enabled = voice_enable_checkbox
-        if voice_enable_checkbox and st.session_state.voice_agent is None:
-            with st.spinner("🎤 Chargement des modèles vocaux..."):
-                try:
-                    st.session_state.voice_agent = StreamingVoiceAgent(
-                        whisper_model="base",  # ~150MB
-                        tts_model="tts_models/fr/mai/tacotron2-DDC"
+    if VOICE_AVAILABLE:
+        st.markdown("---")
+        st.markdown("#### 🎤 Interface Vocale")
+        
+        voice_enable_checkbox = st.checkbox(
+            "Activer le mode vocal",
+            value=st.session_state.get("voice_enabled", False),
+            key="voice_enable_checkbox",
+            help="Active la transcription et synthèse vocale"
+        )
+        
+        if voice_enable_checkbox != st.session_state.get("voice_enabled", False):
+            st.session_state.voice_enabled = voice_enable_checkbox
+            if voice_enable_checkbox and st.session_state.voice_agent is None:
+                with st.spinner("🎤 Chargement des modèles vocaux..."):
+                    try:
+                        st.session_state.voice_agent = StreamingVoiceAgent(
+                            whisper_model="base",  # ~150MB
+                            tts_model="tts_models/fr/mai/tacotron2-DDC"
+                        )
+                        # Charger les modèles
+                        success = st.session_state.voice_agent.load_models(
+                            load_whisper=True,
+                            load_tts=True
+                        )
+                        if success:
+                            st.session_state.voice_models_loaded = True
+                            st.success("✅ Modèles vocaux chargés!")
+                        else:
+                            st.error("❌ Erreur chargement modèles vocaux")
+                            st.info("💡 Lancez: python install_voice_models.py")
+                    except Exception as e:
+                        st.error(f"❌ Erreur: {e}")
+                        st.info("💡 Installez les modèles: python install_voice_models.py")
+        
+        # Afficher le statut vocal
+        if st.session_state.get("voice_enabled", False):
+            if st.session_state.get("voice_models_loaded", False):
+                st.success("🎤 Mode vocal actif")
+                
+                # Options avancées
+                with st.expander("⚙️ Options vocales"):
+                    voice_record_duration = st.slider(
+                        "Durée d'enregistrement (s)",
+                        min_value=3,
+                        max_value=30,
+                        value=5,
+                        key="voice_duration"
                     )
-                    # Charger les modèles
-                    success = st.session_state.voice_agent.load_models(
-                        load_whisper=True,
-                        load_tts=True
+                    voice_auto_play = st.checkbox(
+                        "Lecture automatique des réponses",
+                        value=True,
+                        key="voice_autoplay"
                     )
-                    if success:
-                        st.session_state.voice_models_loaded = True
-                        st.success("✅ Modèles vocaux chargés!")
-                    else:
-                        st.error("❌ Erreur chargement modèles vocaux")
-                        st.info("💡 Lancez: python install_voice_models.py")
-                except Exception as e:
-                    st.error(f"❌ Erreur: {e}")
-                    st.info("💡 Installez les modèles: python install_voice_models.py")
-    
-    # Afficher le statut vocal
-    if st.session_state.get("voice_enabled", False):
-        if st.session_state.get("voice_models_loaded", False):
-            st.success("🎤 Mode vocal actif")
-            
-            # Options avancées
-            with st.expander("⚙️ Options vocales"):
-                voice_record_duration = st.slider(
-                    "Durée d'enregistrement (s)",
-                    min_value=3,
-                    max_value=30,
-                    value=5,
-                    key="voice_duration"
-                )
-                voice_auto_play = st.checkbox(
-                    "Lecture automatique des réponses",
-                    value=True,
-                    key="voice_autoplay"
-                )
-                voice_language = st.selectbox(
-                    "Langue de transcription",
-                    options=["fr", "en", "es", "de"],
-                    index=0,
-                    key="voice_lang"
-                )
-        else:
-            st.warning("⏳ Modèles vocaux non chargés")
+                    voice_language = st.selectbox(
+                        "Langue de transcription",
+                        options=["fr", "en", "es", "de"],
+                        index=0,
+                        key="voice_lang"
+                    )
+            else:
+                st.warning("⏳ Modèles vocaux non chargés")
+    else:
+        st.markdown("---")
+        st.markdown("#### 🎤 Interface Vocale")
+        st.warning("⚠️ Modules vocaux non installés")
+        st.info("💡 Pour activer: `pip install sounddevice soundfile librosa`")
+        st.info("📦 Puis: `python install_voice_models.py`")
     
     st.markdown("---")
     status_display = st.text_area("📊 Statut", value=st.session_state.status_msg, height=100, key='status_sidebar')
@@ -7972,6 +7987,7 @@ with st.sidebar:
         st.session_state.voice_agent = None  # Chargement lazy au premier usage
         st.session_state.voice_enabled = False
         st.session_state.voice_models_loaded = False
+        st.session_state.voice_available = VOICE_AVAILABLE  # Vérifier si les modules sont disponibles
     if pdf_upload:
         files = upload_pdfs(pdf_upload)
         st.session_state.status_msg = f"✅ {len(files)} PDFs uploadés" if files else "⚠️ Aucun PDF"
@@ -8396,7 +8412,7 @@ with main_container:
                     st.markdown(highlight_important_words(msg['content']), unsafe_allow_html=True)
         
         # 🎤 INTERFACE VOCALE - Boutons d'enregistrement
-        if st.session_state.get("voice_enabled", False) and st.session_state.get("voice_models_loaded", False):
+        if VOICE_AVAILABLE and st.session_state.get("voice_enabled", False) and st.session_state.get("voice_models_loaded", False):
             st.markdown("---")
             col_voice1, col_voice2, col_voice3 = st.columns([1, 1, 1])
             
