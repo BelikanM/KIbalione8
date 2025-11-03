@@ -1,0 +1,68 @@
+# Licence du Projet Kibali AI
+
+## ⚖️ Triple Protection Anti-Vol
+
+Ce projet est protégé par **TROIS licences complémentaires** pour maximiser la protection contre le vol et l'exploitation commerciale non autorisée.
+
+### 📋 Licences Disponibles
+
+#### 1. **GNU General Public License v3.0 (GPLv3)**
+- **Fichier:** `LICENSE-GPLv3.txt`
+- **Protection:** Copyleft fort - Toute modification doit être redistribuée sous GPL
+- **Usage:** Logiciel desktop, applications locales
+
+#### 2. **GNU Affero General Public License v3.0 (AGPLv3)**
+- **Fichier:** `LICENSE-AGPLv3.txt`
+- **Protection:** Copyleft étendu - Couvre les services web et API
+- **Usage:** Applications web, services cloud, API
+
+#### 3. **Licence Personnalisée Kibali (Restrictive)**
+- **Fichier:** `LICENSE-CUSTOM.txt`
+- **Protection:** Interdiction totale d'usage commercial sans autorisation
+- **Usage:** Protection maximale contre le vol
+
+---
+
+## 🚫 Interdictions Absolues
+
+**Sous TOUTES les licences:**
+
+❌ **Vol du code** - Toute copie sans attribution
+❌ **Revente** - Commercialisation sans autorisation explicite
+❌ **Utilisation commerciale** - Sans contrat avec l'auteur
+❌ **Suppression des crédits** - Attribution obligatoire
+❌ **Modification sans partage** - Les améliorations doivent être partagées
+
+---
+
+## ✅ Usages Autorisés
+
+**Sous conditions:**
+
+✅ **Usage personnel** - Apprentissage, recherche
+✅ **Usage éducatif** - Enseignement, démonstration
+✅ **Contribution** - Améliorations partagées publiquement
+✅ **Fork personnel** - Avec attribution et licence compatible
+
+---
+
+## 📞 Contact pour Usage Commercial
+
+Pour tout usage commercial, contacter:
+- **Auteur:** BelikanM
+- **Email:** [votre-email@domain.com]
+- **Repository:** https://github.com/BelikanM/lifemodo
+
+**Tarifs:** À négocier selon l'usage
+
+---
+
+## ⚠️ Avertissement
+
+**VIOLATION = PROCÈS**
+
+Toute violation de ces licences entraînera des poursuites judiciaires immédiates.
+
+**DERNIÈRE MISE À JOUR:** 4 novembre 2025
+**AUTEUR:** BelikanM
+**PROJET:** Kibali AI Assistant
