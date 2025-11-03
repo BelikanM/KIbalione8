@@ -2827,11 +2827,13 @@ def process_audio_transcription(audio_path: str, output_text_path: str = None) -
         st.error(f"❌ Erreur transcription audio: {e}")
         return ""
 
-def deep_binary_investigation(file_bytes: bytes, file_name: str = "unknown") -> str:
+def deep_binary_investigation(file_bytes: bytes, file_name: str = "unknown") -> dict:
     """
     🔍 FOUILLE INTELLIGENTE DE FICHIER BINAIRE
     Combine Hex+ASCII Dump + Base Vectorielle RAG + Base ERT pour interprétation scientifique complète
     Similaire à l'agent VSCode avec todo list mais pour l'analyse binaire
+    
+    Returns: dict with keys 'full_report' (str) and 'phases' (dict of phase_name: phase_content)
     """
     investigation_report = "🔬 RAPPORT D'INVESTIGATION BINAIRE APPROFONDIE\n"
     investigation_report += "=" * 80 + "\n\n"
@@ -3356,7 +3358,33 @@ Si des minéraux ont été détectés, mentionne les plus intéressants pour l'e
     investigation_report += "\n" + "=" * 80 + "\n"
     investigation_report += "✅ INVESTIGATION TERMINÉE - Rapport complet généré\n"
     
-    return investigation_report
+    # Split report into phases for better display
+    phases_dict = {}
+    report_lines = investigation_report.split('\n')
+    current_phase = None
+    current_content = []
+    
+    for line in report_lines:
+        # Detect phase markers
+        if '️⃣ PHASE' in line:
+            # Save previous phase if exists
+            if current_phase is not None:
+                phases_dict[current_phase] = '\n'.join(current_content)
+            # Start new phase
+            current_phase = line.strip()
+            current_content = [line]
+        else:
+            if current_phase is not None:
+                current_content.append(line)
+    
+    # Save last phase
+    if current_phase is not None:
+        phases_dict[current_phase] = '\n'.join(current_content)
+    
+    return {
+        'full_report': investigation_report,
+        'phases': phases_dict
+    }
 
 def ert_geophysical_interpretation(numbers: list) -> str:
     """Interprétation géophysique spécialisée des données ERT"""
@@ -3892,24 +3920,57 @@ if uploaded_file:
     with col_inv1:
         if st.button("🔬 LANCER INVESTIGATION COMPLÈTE", type="primary", use_container_width=True):
             with st.spinner("🔍 Investigation en cours (7 phases)..."):
-                investigation_report = deep_binary_investigation(file_bytes, uploaded_file.name)
-                st.session_state.last_investigation = investigation_report
+                investigation_result = deep_binary_investigation(file_bytes, uploaded_file.name)
+                st.session_state.last_investigation = investigation_result
                 st.success("✅ Investigation terminée!")
     
     with col_inv2:
         if "last_investigation" in st.session_state:
             st.download_button(
                 "📥 Télécharger Rapport",
-                st.session_state.last_investigation,
+                st.session_state.last_investigation.get('full_report', ''),
                 file_name=f"investigation_{uploaded_file.name}.txt",
                 mime="text/plain",
                 use_container_width=True
             )
     
-    # Afficher le dernier rapport d'investigation
+    # Afficher le dernier rapport d'investigation en phases expandables
     if "last_investigation" in st.session_state:
-        with st.expander("📋 Rapport d'Investigation Complet", expanded=True):
-            st.text(st.session_state.last_investigation)
+        st.markdown("### 📋 Rapport d'Investigation Complet")
+        
+        result = st.session_state.last_investigation
+        phases = result.get('phases', {})
+        
+        # Add summary statistics for expander titles
+        phase_summaries = {
+            '1️⃣ PHASE 1: EXTRACTION HEX + ASCII': '📜 Dump hexadécimal et extraction de nombres',
+            '2️⃣ PHASE 2: ANALYSES TECHNIQUES': '📊 Entropie, patterns, métadonnées',
+            '3️⃣ PHASE 3: FOUILLE BASE VECTORIELLE RAG': '🔍 Recherche dans la base de connaissances',
+            '4️⃣ PHASE 4: FOUILLE SPÉCIALISÉE ERT': '🔬 Analyse ERT, minéraux, correspondances',
+            '5️⃣ PHASE 5: RECHERCHE WEB INTELLIGENTE': '🌐 Recherche internet contextuelle',
+            '6️⃣ PHASE 6: SYNTHÈSE MULTI-SOURCES': '🎯 Consolidation des résultats',
+            '7️⃣ PHASE 7: RECOMMANDATIONS': '💡 Actions suggérées'
+        }
+        
+        # Display each phase in its own expander
+        for i, (phase_title, phase_content) in enumerate(phases.items()):
+            # Extract phase number emoji for matching
+            phase_key = phase_title.split('\n')[0] if '\n' in phase_title else phase_title
+            summary = phase_summaries.get(phase_key, '')
+            
+            # Count lines for height estimation
+            num_lines = len(phase_content.split('\n'))
+            estimated_height = min(500, max(200, num_lines * 15))
+            
+            # Only first expander open by default
+            with st.expander(f"{phase_key} - {summary}", expanded=(i==0)):
+                st.text_area(
+                    label="Contenu de la phase",
+                    value=phase_content,
+                    height=estimated_height,
+                    key=f"phase_{i}",
+                    label_visibility="collapsed"
+                )
     
     # Analyse automatique du fichier dès l'upload
     if st.button("🚀 Analyser automatiquement avec IA (GPU optimisé)"):
@@ -5702,7 +5763,7 @@ def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None)
         ),
         Tool(
             name="Deep_Binary_Investigation",
-            func=lambda file_name: deep_binary_investigation(file_bytes, file_name) if 'file_bytes' in globals() else "❌ Fichier binaire requis",
+            func=lambda file_name: deep_binary_investigation(file_bytes, file_name).get('full_report', '') if 'file_bytes' in globals() else "❌ Fichier binaire requis",
             description="🔍 FOUILLE INTELLIGENTE d'un fichier binaire uploadé: Combine Hex+ASCII Dump + Base Vectorielle RAG + Base ERT pour interprétation scientifique. Analyse déjà effectuée sur fichiers uploadés. Fournis le nom du fichier."
         ),
         Tool(
