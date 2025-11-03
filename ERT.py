@@ -1143,10 +1143,19 @@ def apply_mode_behavior(response: str, question: str, mode: str) -> str:
 
 def search_vectorstore(query: str) -> str:
     """Recherche dans la base vectorielle FAISS des documents PDF indexés pour enrichir l'analyse"""
-    if not st.session_state.vectorstore:
-        return "❌ Aucune base vectorielle disponible. Veuillez d'abord indexer des PDFs."
+    # Essayer d'abord vectordb (base principale de Kibali), puis vectorstore (base binaire)
+    vectordb = None
+    
+    if hasattr(st.session_state, 'vectordb') and st.session_state.vectordb is not None:
+        vectordb = st.session_state.vectordb
+    elif hasattr(st.session_state, 'vectorstore') and st.session_state.vectorstore is not None:
+        vectordb = st.session_state.vectorstore
+    
+    if not vectordb:
+        return "❌ Aucune base vectorielle disponible. Veuillez d'abord indexer des PDFs dans la sidebar ou uploader des PDFs ci-dessus."
+    
     try:
-        retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 5})
+        retriever = vectordb.as_retriever(search_kwargs={"k": 5})
         docs = retriever.get_relevant_documents(query)
         if not docs:
             return "ℹ️ Aucun document pertinent trouvé dans la base de connaissances."
@@ -4304,12 +4313,36 @@ if uploaded_pdfs and st.button("Indexer les PDFs dans la base vectorielle"):
             embeddings = SentenceTransformerEmbeddings('sentence-transformers/all-MiniLM-L6-v2', device=device)
           
             st.session_state.vectorstore = FAISS.from_documents(splits, embeddings)
-            # Synchroniser avec vectordb pour que l'agent Kibali ait accès
+            
+            # Synchroniser avec vectordb pour que Kibali ait accès
             if "vectordb" not in st.session_state:
                 st.session_state.vectordb = None
-            st.session_state.vectordb = st.session_state.vectorstore
+            
+            # Fusionner avec vectordb existant si présent, sinon créer nouveau
+            if st.session_state.vectordb is not None:
+                try:
+                    # Ajouter les nouveaux documents à la base existante
+                    st.session_state.vectordb.add_documents(splits)
+                    st.info("📚 Documents ajoutés à la base vectorielle existante de Kibali")
+                except:
+                    # Si erreur, remplacer complètement
+                    st.session_state.vectordb = st.session_state.vectorstore
+                    st.warning("⚠️ Remplacement de la base vectorielle")
+            else:
+                # Créer nouvelle base
+                st.session_state.vectordb = st.session_state.vectorstore
+                st.info("✨ Nouvelle base vectorielle créée pour Kibali")
       
-            st.success("Base vectorielle créée avec succès ! Kibali peut maintenant accéder à ces documents.")
+            st.success("✅ Base vectorielle créée avec succès ! Kibali peut maintenant accéder à ces documents.")
+            
+            # Sauvegarder aussi dans le chemin standard si possible
+            try:
+                VECTORDB_PATH = "/root/chatbot_data/vectordb"
+                os.makedirs(os.path.dirname(VECTORDB_PATH), exist_ok=True)
+                st.session_state.vectordb.save_local(VECTORDB_PATH)
+                st.info(f"💾 Base sauvegardée dans {VECTORDB_PATH}")
+            except Exception as e:
+                st.warning(f"⚠️ Impossible de sauvegarder: {e}")
 # Section for binary file upload
 uploaded_file = st.file_uploader("Choisir un fichier binaire", type=["bin","dat","raw","bin","safetensors","pt","ckpt"])
 if uploaded_file:
@@ -6093,8 +6126,8 @@ def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None)
         # Outils de base RAG et recherche
         Tool(
             name="Local_Knowledge_Base",
-            func=lambda q: search_vectorstore(q) if hasattr(st.session_state, 'vectorstore') and st.session_state.vectorstore else "❌ Base vectorielle non disponible. Indexez des PDFs d'abord.",
-            description="Recherche dans la base de connaissances locale (PDFs et documents internes). Utilise ceci en PREMIER pour les questions sur des documents spécifiques."
+            func=lambda q: search_vectorstore(q),
+            description="Recherche dans la base de connaissances locale (PDFs et documents internes). Utilise ceci en PREMIER pour les questions sur des documents spécifiques. Accède automatiquement à vectordb ou vectorstore selon disponibilité."
         ),
         Tool(
             name="Chat_History_Search", # AJOUT MÉMOIRE VECTORIELLE: Nouvel outil pour historique
@@ -6113,7 +6146,7 @@ def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None)
         ),
         Tool(
             name="Hybrid_Search",
-            func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=3, web_search_enabled=True, chat_vectordb=chat_vectordb)]) if vectordb else search_vectorstore(q) if hasattr(st.session_state, 'vectorstore') and st.session_state.vectorstore else "❌ Base non disponible",
+            func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=3, web_search_enabled=True, chat_vectordb=chat_vectordb)]) if vectordb else search_vectorstore(q),
             description="Recherche hybride combinant base locale, historique chat ET web. Idéal pour des questions nécessitant à la fois des données internes, passées et externes."
         ),
         Tool(
