@@ -12,6 +12,7 @@ pdfs/
 uploads/
 videos/
 vectordb/
+chat_vectordb/
 
 # JSON sensibles à ignorer si nécessaire
 metadata.json
