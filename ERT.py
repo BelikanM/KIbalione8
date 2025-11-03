@@ -7861,9 +7861,20 @@ with main_container:
         
         with mode_col2:
             if kibali_mode == "code_expert":
-                if st.button("📦 Installer CodeLlama", key="install_codellama"):
-                    with st.spinner("Téléchargement du modèle de code..."):
-                        install_code_model()
+                # Vérifier si le modèle est installé
+                code_model_path = "/root/.cache/huggingface/code_models"
+                model_installed = os.path.exists(code_model_path) and os.listdir(code_model_path)
+                
+                if model_installed:
+                    st.success("✅ DeepSeek-Coder installé")
+                    if st.button("� Réinstaller", key="reinstall_codellama"):
+                        with st.spinner("Téléchargement..."):
+                            install_code_model()
+                else:
+                    if st.button("📦 Installer DeepSeek-Coder", key="install_codellama", help="Télécharge ~1.3GB. Prend 5-10 min"):
+                        with st.spinner("Téléchargement du modèle de code..."):
+                            st.info("💡 Alternative plus rapide: `python download_code_model.py` dans le terminal")
+                            install_code_model()
         
         # Description du mode sélectionné
         mode_descriptions = {
