@@ -1,0 +1,178 @@
+# LICENCE PERSONNALISÉE KIBALI - PROTECTION ANTI-VOL
+
+## ⚖️ LICENCE RESTRICTIVE - USAGE STRICTEMENT PERSONNEL UNIQUEMENT
+
+**Version 1.0 - 4 novembre 2025**
+
+**AUTEUR ORIGINAL:** BelikanM
+**PROJET:** Kibali AI Assistant
+**REPOSITORY:** https://github.com/BelikanM/lifemodo
+
+---
+
+## 🚫 INTERDICTIONS ABSOLUES
+
+### ARTICLE 1: USAGE COMMERCIAL INTERDIT
+
+**Toute utilisation commerciale de ce logiciel est STRICTEMENT INTERDITE.**
+
+Sont considérés comme usage commercial:
+- ❌ Vente du logiciel ou de ses composants
+- ❌ Intégration dans un produit payant
+- ❌ Utilisation dans un service commercial
+- ❌ Location ou leasing du logiciel
+- ❌ Utilisation dans un environnement professionnel rémunéré
+- ❌ Distribution à des fins lucratives
+- ❌ Utilisation pour générer des revenus directs ou indirects
+
+### ARTICLE 2: DISTRIBUTION ET PARTAGE INTERDITS
+
+**Toute distribution, copie ou partage est INTERDITE sans autorisation écrite explicite.**
+
+- ❌ Téléchargement par des tiers
+- ❌ Partage sur des plateformes (GitHub, GitLab, etc.)
+- ❌ Fork du repository sans autorisation
+- ❌ Copie partielle ou totale du code
+- ❌ Utilisation dans d'autres projets
+- ❌ Publication sur des sites web
+
+### ARTICLE 3: MODIFICATION INTERDITE
+
+**Toute modification du code source est INTERDITE.**
+
+- ❌ Changement du code source
+- ❌ Ajout de fonctionnalités
+- ❌ Correction de bugs
+- ❌ Optimisation du code
+- ❌ Traduction du code
+- ❌ Adaptation à d'autres environnements
+
+### ARTICLE 4: RÉTRO-INGÉNIERIE INTERDITE
+
+**Toute tentative de rétro-ingénierie est INTERDITE.**
+
+- ❌ Analyse du code source
+- ❌ Décompilation
+- ❌ Ingénierie inverse
+- ❌ Étude des algorithmes
+- ❌ Analyse des modèles d'IA
+
+---
+
+## ✅ USAGES AUTORISÉS (TRÈS LIMITÉS)
+
+### ARTICLE 5: USAGE PERSONNEL STRICTEMENT PRIVÉ
+
+**Seul l'usage personnel privé de l'auteur original est autorisé.**
+
+Conditions cumulatives:
+- ✅ Utilisation uniquement par BelikanM
+- ✅ Sur ses machines personnelles uniquement
+- ✅ Pour ses projets personnels uniquement
+- ✅ Sans partage avec quiconque
+- ✅ Sans utilisation professionnelle
+
+**Toute violation de ces conditions annule immédiatement tous les droits.**
+
+---
+
+## 🔒 PROTECTION TECHNIQUE
+
+### ARTICLE 6: MESURES DE PROTECTION
+
+Le logiciel peut inclure des mécanismes de protection:
+- 🔒 Vérification de l'identité de l'utilisateur
+- 🔒 Limitation à certaines adresses IP
+- 🔒 Désactivation à distance
+- 🔒 Collecte de données d'usage
+- 🔒 Watermarking du code
+
+### ARTICLE 7: OBLIGATION DE CONFIDENTIALITÉ
+
+**L'utilisateur s'engage à:**
+- 🔒 Ne pas divulguer l'existence du logiciel
+- 🔒 Ne pas mentionner ses fonctionnalités
+- 🔒 Ne pas partager des captures d'écran
+- 🔒 Ne pas discuter du projet publiquement
+
+---
+
+## ⚖️ SANCTIONS
+
+### ARTICLE 8: VIOLATIONS ET CONSÉQUENCES
+
+**Toute violation de cette licence entraînera:**
+
+1. **Résiliation immédiate** de tous les droits d'usage
+2. **Poursuites judiciaires** systématiques
+3. **Demande de dommages et intérêts** pour préjudice moral et matériel
+4. **Publication publique** de la violation
+5. **Blocage définitif** de l'accès au logiciel
+
+### ARTICLE 9: JURIDICTION
+
+**Les tribunaux français sont seuls compétents** pour tout litige relatif à cette licence.
+
+---
+
+## 📜 CLAUSES GÉNÉRALES
+
+### ARTICLE 10: NULLITÉ PARTIELLE
+
+Si une clause de cette licence est déclarée nulle, les autres clauses restent pleinement valides.
+
+### ARTICLE 11: RENONCIATION À LA GARANTIE
+
+**CE LOGICIEL EST FOURNI "EN L'ÉTAT", SANS AUCUNE GARANTIE.**
+
+L'auteur décline toute responsabilité pour:
+- 🔸 Dysfonctionnements
+- 🔸 Pertes de données
+- 🔸 Dommages matériels
+- 🔸 Préjudices financiers
+- 🔸 Violations de sécurité
+
+### ARTICLE 12: LIMITATION DE RESPONSABILITÉ
+
+**La responsabilité de l'auteur est limitée au montant maximum autorisé par la loi.**
+
+### ARTICLE 13: DROIT APPLICABLE
+
+**Le droit français s'applique exclusivement à cette licence.**
+
+---
+
+## 📞 CONTACT
+
+**Pour toute question ou demande d'autorisation exceptionnelle:**
+
+- **Auteur:** BelikanM
+- **Email:** [votre-email@domain.com]
+- **Repository:** https://github.com/BelikanM/lifemodo
+- **Délai de réponse:** 30 jours maximum
+
+**AUCUNE DEMANDE NE SERA ACCEPTEE SANS JUSTIFICATION DÉTAILLÉE.**
+
+---
+
+## ⚠️ AVERTISSEMENT FINAL
+
+**EN UTILISANT CE LOGICIEL, VOUS RECONNAISSEZ AVOIR LU ET ACCEPTÉ CETTE LICENCE.**
+
+**TOUTE UTILISATION NON AUTORISÉE CONSTITUE UNE VIOLATION DE PROPRIÉTÉ INTELLECTUELLE.**
+
+**VOUS ASSUMEZ L'ENTIÈRE RESPONSABILITÉ DE VOTRE UTILISATION.**
+
+---
+
+**SIGNATURE ÉLECTRONIQUE**
+
+BelikanM
+4 novembre 2025
+Paris, France
+
+**Cachet numérique:** KIBALI-AI-2025-PROPRIÉTÉ-EXCLUSIVE
+
+---
+
+*Cette licence est protégée par le droit d'auteur. Toute reproduction est interdite.*
