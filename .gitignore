@@ -96,3 +96,4 @@ CUDAV/
 
 # Conda
 miniconda3/
+.env
