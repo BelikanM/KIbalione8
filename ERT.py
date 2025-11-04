@@ -1517,7 +1517,7 @@ Volume actuel: ~{word_count} mots | Niveau: Académique/Professionnel
     return response
 
 def search_vectorstore(query: str) -> str:
-    """Recherche dans la base vectorielle FAISS des documents PDF indexés pour enrichir l'analyse"""
+    """Recherche GLOBALE dans la base vectorielle FAISS de TOUS les documents PDF indexés pour enrichir l'analyse"""
     # Essayer d'abord vectordb (base principale de Kibali), puis vectorstore (base binaire)
     vectordb = None
     
@@ -1530,15 +1530,50 @@ def search_vectorstore(query: str) -> str:
         return "❌ Aucune base vectorielle disponible. Veuillez d'abord indexer des PDFs dans la sidebar ou uploader des PDFs ci-dessus."
     
     try:
-        retriever = vectordb.as_retriever(search_kwargs={"k": 5})
+        # Récupérer le nombre total de documents dans la base
+        total_docs = vectordb.index.ntotal if hasattr(vectordb, 'index') else 100
+        
+        # Recherche GLOBALE : récupérer BEAUCOUP plus de documents (au moins 50, ou tout si moins)
+        # k=50 pour fouiller profondément dans toute la base
+        search_k = min(50, total_docs) if total_docs > 0 else 50
+        
+        retriever = vectordb.as_retriever(
+            search_type="similarity",
+            search_kwargs={
+                "k": search_k,  # Recherche GLOBALE sur 50 documents minimum
+                "fetch_k": search_k * 2  # Fetch encore plus pour meilleure qualité
+            }
+        )
         docs = retriever.get_relevant_documents(query)
+        
         if not docs:
             return "ℹ️ Aucun document pertinent trouvé dans la base de connaissances."
-        context = "\n\n".join([
-            f"📄 Document {i+1} (Source: {doc.metadata.get('source', 'Unknown')}):\n{doc.page_content[:500]}..."
-            for i, doc in enumerate(docs)
-        ])
-        return f"✅ {len(docs)} documents pertinents trouvés dans la base RAG:\n{context}"
+        
+        # Grouper par source pour avoir une vue globale
+        sources = {}
+        for doc in docs:
+            source = doc.metadata.get('source', 'Unknown')
+            if source not in sources:
+                sources[source] = []
+            sources[source].append(doc.page_content[:300])
+        
+        # Construire un contexte enrichi de TOUS les documents pertinents
+        context_parts = []
+        context_parts.append(f"✅ {len(docs)} chunks pertinents trouvés dans {len(sources)} sources différentes:\n")
+        
+        for i, (source, chunks) in enumerate(sources.items(), 1):
+            context_parts.append(f"\n📄 Source {i}: {source} ({len(chunks)} chunks)")
+            # Afficher les 3 premiers chunks de chaque source
+            for j, chunk in enumerate(chunks[:3], 1):
+                context_parts.append(f"   Extrait {j}: {chunk}...")
+        
+        # Résumé global
+        context_parts.append(f"\n\n📊 COUVERTURE GLOBALE:")
+        context_parts.append(f"   • {len(docs)} passages analysés")
+        context_parts.append(f"   • {len(sources)} documents différents consultés")
+        context_parts.append(f"   • Recherche profonde sur {search_k} résultats")
+        
+        return "\n".join(context_parts)
     except Exception as e:
         return f"❌ Erreur lors de la recherche RAG: {str(e)}"
 def web_search_enhanced(query: str, search_type="general") -> str:
@@ -5030,12 +5065,34 @@ PERFORMANCE: Mode {mode_display} activé pour traitement optimisé.
                 web_results = tool.invoke(prompt)
                 web_context = "\n".join([r["content"] for r in web_results])
                 context = f"Contexte web:\n{web_context}"
-                # Contexte documents si disponible
+                # Contexte documents si disponible - RECHERCHE GLOBALE
                 if st.session_state.vectorstore:
-                    retriever = st.session_state.vectorstore.as_retriever(search_kwargs={"k": 3})
+                    # Récupérer beaucoup plus de documents pour une couverture globale
+                    total_docs = st.session_state.vectorstore.index.ntotal if hasattr(st.session_state.vectorstore, 'index') else 100
+                    search_k = min(30, total_docs) if total_docs > 0 else 30
+                    
+                    retriever = st.session_state.vectorstore.as_retriever(
+                        search_type="similarity",
+                        search_kwargs={
+                            "k": search_k,  # Recherche profonde sur 30+ documents
+                            "fetch_k": search_k * 2
+                        }
+                    )
                     docs = retriever.get_relevant_documents(prompt)
-                    doc_context = "\n\n".join([d.page_content for d in docs])
-                    context += f"\n\nContexte documents indexés:\n{doc_context}"
+                    
+                    # Grouper par source pour meilleure vue globale
+                    sources = {}
+                    for doc in docs:
+                        source = doc.metadata.get('source', 'Unknown')
+                        if source not in sources:
+                            sources[source] = []
+                        sources[source].append(doc.page_content[:400])
+                    
+                    doc_context = f"\n📊 {len(docs)} passages trouvés dans {len(sources)} sources:\n"
+                    for source, chunks in sources.items():
+                        doc_context += f"\n📄 {source}:\n" + "\n".join(chunks[:2])
+                    
+                    context += f"\n\nContexte documents indexés (recherche globale):\n{doc_context}"
                 full_prompt = f"""Tu es un assistant expert en analyse de données et fichiers binaires. Utilise le contexte fourni pour donner des réponses précises et utiles.
 {context}
 Question de l'utilisateur: {prompt}
@@ -5956,11 +6013,21 @@ def create_client():
         st.write(f"❌ Erreur création client: {e}. Passage en mode local.")
         return LocalClient()
 def rag_search(question, vectordb, k=3):
-    """Rechercher dans la base vectorielle"""
+    """Rechercher dans la base vectorielle avec recherche GLOBALE approfondie"""
     if not vectordb:
         return []
     try:
-        return vectordb.similarity_search(question, k=k)
+        # Augmenter k pour une recherche plus globale
+        # Si k petit, forcer minimum 20 pour fouille approfondie
+        effective_k = max(k, 20) if k < 20 else k
+        
+        # Récupérer le nombre total de documents
+        total_docs = vectordb.index.ntotal if hasattr(vectordb, 'index') else 100
+        
+        # Ajuster k au minimum entre le demandé et le total disponible
+        final_k = min(effective_k, total_docs) if total_docs > 0 else effective_k
+        
+        return vectordb.similarity_search(question, k=final_k)
     except Exception as e:
         st.write(f"❌ Erreur recherche: {e}")
         return []
@@ -6099,11 +6166,11 @@ def intelligent_query_expansion(query):
     return expanded_queries[:3] # Limiter à 3 requêtes max
 def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search_type="both", chat_vectordb=None): # AJOUT MÉMOIRE VECTORIELLE: Param pour chat_vectordb
     """
-    Recherche hybride améliorée combinant RAG local et web avec intelligence
+    Recherche hybride améliorée combinant RAG local GLOBAL et web avec intelligence
     Args:
         query: Requête de recherche
         vectordb: Base vectorielle locale
-        k: Nombre de résultats RAG
+        k: Nombre MINIMUM de résultats RAG (sera augmenté pour recherche globale)
         web_search_enabled: Activer la recherche web
         search_type: Type de recherche web
         chat_vectordb: Base pour historique chat (optionnel)
@@ -6111,12 +6178,17 @@ def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search
         Liste de documents combinés et enrichis
     """
     all_results = []
-    # 1. Recherche RAG locale
-    local_docs = rag_search(query, vectordb, k)
+    
+    # 1. Recherche RAG locale GLOBALE avec k augmenté
+    # Pour une fouille complète, utiliser au moins 30 documents
+    global_k = max(k, 30)
+    local_docs = rag_search(query, vectordb, global_k)
     for doc in local_docs:
         doc.metadata['search_source'] = 'local_rag'
         doc.metadata['relevance_score'] = 1.0 # Score max pour les docs locaux
     all_results.extend(local_docs)
+    
+    st.write(f"📚 Recherche globale: {len(local_docs)} documents trouvés dans la base locale")
     # AJOUT MÉMOIRE VECTORIELLE: Recherche dans historique chat pour contexte conversationnel
     if chat_vectordb:
         chat_docs = chat_rag_search(query, chat_vectordb, k=3)
@@ -6521,8 +6593,8 @@ def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None)
         ),
         Tool(
             name="Hybrid_Search",
-            func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=3, web_search_enabled=True, chat_vectordb=chat_vectordb)]) if vectordb else search_vectorstore(q),
-            description="Recherche hybride combinant base locale, historique chat ET web. Idéal pour des questions nécessitant à la fois des données internes, passées et externes."
+            func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=30, web_search_enabled=True, chat_vectordb=chat_vectordb)]) if vectordb else search_vectorstore(q),
+            description="Recherche hybride GLOBALE combinant TOUTE la base locale (30+ docs), historique chat ET web. Idéal pour des questions nécessitant une fouille approfondie dans TOUS les documents disponibles."
         ),
         Tool(
             name="Current_News_Search",
