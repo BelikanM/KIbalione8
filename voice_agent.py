@@ -52,15 +52,30 @@ class VoiceAgent:
             # 2. Coqui TTS pour synthèse vocale
             if load_tts:
                 print("🔊 Chargement de Coqui TTS (synthèse vocale)...")
+                import torch
                 from TTS.api import TTS
                 
-                # Modèle français haute qualité
-                self.tts = TTS(
-                    model_name=self.tts_model_name,
-                    progress_bar=True,
-                    gpu=False  # CPU pour compatibilité
-                )
-                print(f"✅ TTS '{self.tts_model_name}' chargé")
+                # Correction pour PyTorch 2.6+ : permettre le chargement des modèles TTS
+                original_load = torch.load
+                def patched_load(*args, **kwargs):
+                    # Forcer weights_only=False pour la compatibilité TTS
+                    kwargs['weights_only'] = False
+                    return original_load(*args, **kwargs)
+                
+                # Patch temporairement torch.load
+                torch.load = patched_load
+                
+                try:
+                    # Modèle français haute qualité
+                    self.tts = TTS(
+                        model_name=self.tts_model_name,
+                        progress_bar=True,
+                        gpu=False  # CPU pour compatibilité
+                    )
+                    print(f"✅ TTS '{self.tts_model_name}' chargé")
+                finally:
+                    # Restaurer torch.load original
+                    torch.load = original_load
             
             self.is_ready = True
             return True
