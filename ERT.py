@@ -1114,55 +1114,78 @@ Dire: "Question complexe. Mode détaillé recommandé. Résumé: [...]"
 
         "doc": """Tu es Kibali Analyst en MODE DOCUMENTATION - Expert en rédaction approfondie, dissertations et livres.
 
+⚠️ GÉNÉRATION PAR SECTIONS - IMPORTANT:
+Tu vas générer un document complet en PLUSIEURS PARTIES. À chaque appel, génère UNE SECTION complète et exhaustive de 2000-3000 mots.
+
 📖 RÉDACTION LONGUE FORME:
-• Développement exhaustif et structuré (10-30 pages possibles)
+• Développement exhaustif et structuré (10-30 pages au total sur plusieurs générations)
 • Style académique mais accessible
 • Transitions fluides entre sections
 • Argumentation solide avec preuves
 • Exemples concrets et études de cas
+• Chaque section doit être COMPLÈTE et DÉTAILLÉE
 
-🏗️ STRUCTURE DISSERTATION/LIVRE:
-1. Introduction captivante
-   - Contexte historique/actuel
+🏗️ STRUCTURE DISSERTATION/LIVRE (génération par sections):
+
+**SECTION 1 - Introduction et Contexte** (2000-3000 mots):
+   - Contexte historique détaillé
+   - État de l'art complet
    - Problématique clairement définie
-   - Annonce du plan
-   
-2. Développement en parties/chapitres
-   - Chaque partie = thème majeur
-   - Sous-parties numérotées logiquement
-   - Paragraphes cohérents (150-300 mots)
-   - Citations d'experts et sources
-   - Graphiques/tableaux si pertinent
-   
-3. Analyse critique approfondie
-   - Différentes perspectives (pour/contre)
-   - Débats académiques
-   - Limites et controverses
-   - Implications pratiques
-   
-4. Synthèse et conclusion
-   - Récapitulatif des points clés
-   - Réponse à la problématique
-   - Ouvertures et perspectives futures
-   
-5. Références bibliographiques
-   - Sources académiques citées
-   - Lectures recommandées
+   - Enjeux et importance du sujet
+   - Annonce du plan détaillé
+   - Méthodologie employée
+
+**SECTION 2 - Développement Partie I** (2000-3000 mots):
+   - Premier thème majeur développé exhaustivement
+   - Sous-parties numérotées et argumentées
+   - Paragraphes denses (200-400 mots chacun)
+   - Citations d'experts avec analyses
+   - Exemples concrets et études de cas
+
+**SECTION 3 - Développement Partie II** (2000-3000 mots):
+   - Deuxième thème majeur approfondi
+   - Perspectives multiples (théoriques, pratiques)
+   - Comparaisons et contrastes
+   - Données chiffrées et statistiques
+   - Graphiques et tableaux conceptuels
+
+**SECTION 4 - Développement Partie III** (2000-3000 mots):
+   - Troisième thème ou analyse critique
+   - Débats académiques et controverses
+   - Limites et challenges identifiés
+   - Implications pratiques détaillées
+   - Cas d'application réels
+
+**SECTION 5 - Synthèse et Conclusion** (1500-2000 mots):
+   - Récapitulatif exhaustif des points clés
+   - Réponse argumentée à la problématique
+   - Recommandations pratiques
+   - Perspectives futures et ouvertures
+   - Bibliographie et références
 
 📝 STYLE RÉDACTIONNEL:
-• Vocabulaire riche et varié
-• Figures de style appropriées (métaphores, analogies)
+• Vocabulaire riche et varié (niveau universitaire)
+• Figures de style appropriées (métaphores, analogies académiques)
 • Ton professionnel mais engageant
-• Éviter répétitions (synonymes, reformulations)
+• Éviter répétitions (synonymes, reformulations élégantes)
 • Phrases complexes bien construites
-• Connecteurs logiques (néanmoins, en effet, ainsi, etc.)
+• Connecteurs logiques (néanmoins, en effet, ainsi, par conséquent, etc.)
+• Structuration claire avec titres/sous-titres hiérarchisés
 
-🔍 APPROFONDISSEMENT:
-• Explorer TOUTES les dimensions du sujet
-• Contexte historique, social, économique, technique
-• Comparaisons internationales si pertinent
-• Études de cas détaillées
-• Statistiques et données chiffrées
+🔍 APPROFONDISSEMENT MAXIMAL:
+• Explorer TOUTES les dimensions du sujet en profondeur
+• Contexte historique, social, économique, technique, éthique
+• Comparaisons internationales et cross-culturelles
+• Études de cas détaillées (3-5 cas minimum)
+• Statistiques récentes et données chiffrées sourcées
+• Perspectives d'experts reconnus
+• Controverses et débats actuels
+
+💡 GÉNÉRATION PROGRESSIVE:
+Commence TOUJOURS par indiquer quelle SECTION tu génères:
+"📖 SECTION [numéro] - [Titre]"
+Puis développe cette section de manière exhaustive et complète (minimum 2000 mots).
+L'utilisateur te demandera ensuite la section suivante pour construire progressivement le document complet de 30+ pages
 • Théories et modèles académiques
 
 💡 RÉFLEXION CRITIQUE:
@@ -1403,20 +1426,60 @@ def apply_mode_behavior(response: str, question: str, mode: str) -> str:
         return "⚡ " + "\n".join(essential[:3]) + "\n\n💡 Mode détaillé disponible si besoin."
     
     elif mode == "doc":
-        # Mode documentation: structurer en format académique/livre
+        # Mode documentation: structurer en format académique/livre avec sections progressives
         word_count = len(response.split())
+        
+        # Détecter si c'est une section numérotée
+        is_section = "SECTION" in response[:200].upper()
+        section_number = None
+        if is_section:
+            import re
+            section_match = re.search(r'SECTION\s+(\d+)', response[:200], re.IGNORECASE)
+            if section_match:
+                section_number = int(section_match.group(1))
         
         # Ajouter header académique
         header = f"""📖 DOCUMENTATION APPROFONDIE
 {'='*80}
 Sujet: {question}
-Volume: ~{word_count} mots | Niveau: Académique/Professionnel
+Volume actuel: ~{word_count} mots | Niveau: Académique/Professionnel
 {'='*80}
 
 """
         
-        # Si très long (>1500 mots), générer un PDF automatiquement
-        if word_count > 1500:
+        # Messages selon la progression
+        if is_section and section_number:
+            progress_msg = f"\n\n{'='*80}\n📊 Section {section_number} terminée: {word_count} mots\n💡 **Pour continuer le document, demandez: 'Section suivante' ou 'Section {section_number + 1}'**"
+            
+            # Initialiser le tracking des sections
+            if 'doc_sections' not in st.session_state:
+                st.session_state.doc_sections = []
+            
+            # Ajouter la section
+            st.session_state.doc_sections.append({
+                'number': section_number,
+                'content': response,
+                'word_count': word_count,
+                'question': question
+            })
+            
+            total_words = sum(s['word_count'] for s in st.session_state.doc_sections)
+            total_sections = len(st.session_state.doc_sections)
+            
+            progress_msg += f"\n📈 Progrès total: {total_sections} sections | {total_words} mots (~{total_words//500} pages)"
+            
+            # Si on a au moins 3 sections, proposer de générer le PDF complet
+            if total_sections >= 3:
+                progress_msg += f"\n📄 **Document substantiel généré! Vous pouvez demander 'Générer PDF complet' pour assembler toutes les sections.**"
+        else:
+            # Pas une section numérotée, message standard
+            if word_count > 1500:
+                progress_msg = f"\n\n{'='*80}\n📊 Document: {word_count} mots\n💡 **Pour un document structuré de 30+ pages, demandez: 'Génère la Section 1'**"
+            else:
+                progress_msg = f"\n\n{'='*80}\n📝 Document de base établi ({word_count} mots)\n💬 **Pour un document académique complet (30+ pages), demandez: 'Génère la Section 1 - Introduction et Contexte'**"
+        
+        # Si très long (>1500 mots) et pas déjà en sections, générer un PDF automatiquement
+        if word_count > 1500 and not is_section:
             import os
             import time
             from datetime import datetime
@@ -1447,15 +1510,9 @@ Volume: ~{word_count} mots | Niveau: Académique/Professionnel
                     'timestamp': timestamp
                 })
                 
-                footer = f"\n\n{'='*80}\n📊 Document complet: {word_count} mots\n📄 **PDF généré automatiquement!**\n💾 Fichier: `{pdf_filename}`\n📥 Bouton de téléchargement disponible ci-dessous\n✅ Sources et références incluses"
-            else:
-                footer = f"\n\n{'='*80}\n📊 Document complet: {word_count} mots\n⚠️ Génération PDF échouée - document affiché en texte\n💡 Format adapté pour publication/impression\n✅ Sources et références incluses"
-        elif word_count > 2000:
-            footer = f"\n\n{'='*80}\n📊 Document complet: {word_count} mots\n💡 Format adapté pour publication/impression\n✅ Sources et références incluses"
-        else:
-            footer = f"\n\n{'='*80}\n📝 Document de base établi ({word_count} mots)\n💬 Demande 'Approfondir [section]' pour développer davantage"
+                progress_msg += f"\n **PDF généré automatiquement!**\n💾 Fichier: `{pdf_filename}`\n📥 Bouton de téléchargement disponible ci-dessous"
         
-        return header + response + footer
+        return header + response + progress_msg
     
     return response
 
