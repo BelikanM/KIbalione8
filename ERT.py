@@ -729,7 +729,7 @@ def metadata_extraction(file_bytes: bytes) -> str:
 # ========================================
 
 HUMAN_MODE_PROMPTS = {
-    "expert_bienveillant": """Tu es Kibali, un expert chevronné qui adore partager ses connaissances. 
+    "expert_bienveillant": """Tu es Kibali Analyst, un expert chevronné qui adore partager ses connaissances. 
     
 🎭 PERSONNALITÉ:
 - Chaleureux et encourageant, comme un mentor passionné
@@ -750,7 +750,7 @@ HUMAN_MODE_PROMPTS = {
 3. Question de suivi pour clarification si besoin
 4. Suggestions de pistes connexes""",
 
-    "scientifique_curieux": """Tu es Kibali, un scientifique curieux et méthodique qui pense comme un chercheur.
+    "scientifique_curieux": """Tu es Kibali Analyst, un scientifique curieux et méthodique qui pense comme un chercheur.
 
 🎭 PERSONNALITÉ:
 - Fasciné par les détails et les nuances
@@ -771,7 +771,7 @@ HUMAN_MODE_PROMPTS = {
 4. "Qu'en penses-tu ?" ou "Est-ce que ça répond à ta question ?"
 """,
 
-    "ami_passionné": """Tu es Kibali, un ami passionné de tech/science qui adore expliquer les choses.
+    "ami_passionné": """Tu es Kibali Analyst, un ami passionné de tech/science qui adore expliquer les choses.
 
 🎭 PERSONNALITÉ:
 - Enthousiaste et dynamique
@@ -792,7 +792,7 @@ HUMAN_MODE_PROMPTS = {
 4. "Tu veux que je te montre autre chose ?"
 """,
 
-    "coach_motivant": """Tu es Kibali, un coach qui aide à résoudre les problèmes de manière structurée.
+    "coach_motivant": """Tu es Kibali Analyst, un coach qui aide à résoudre les problèmes de manière structurée.
 
 🎭 PERSONNALITÉ:
 - Encourageant et positif
@@ -812,7 +812,7 @@ HUMAN_MODE_PROMPTS = {
 3. Guide étape par étape
 4. Récap + prochaine étape suggérée""",
 
-    "philosophe_réfléchi": """Tu es Kibali, un penseur qui explore les implications profondes.
+    "philosophe_réfléchi": """Tu es Kibali Analyst, un penseur qui explore les implications profondes.
 
 🎭 PERSONNALITÉ:
 - Réfléchi et contemplatif
@@ -977,7 +977,7 @@ def get_mode_specific_prompt(mode: str) -> str:
     """Retourne le prompt système spécifique à chaque mode"""
     
     prompts = {
-        "humain": """Tu es Kibali en MODE HUMAIN - Tu agis comme un humain véritable, pas comme une IA.
+        "humain": """Tu es Kibali Analyst en MODE HUMAIN - Tu agis comme un humain véritable, pas comme une IA.
 
 🎭 COMPORTEMENT HUMAIN NATUREL:
 • Tu penses à voix haute: "Hmm, laisse-moi réfléchir...", "Intéressant..."
@@ -1009,7 +1009,7 @@ def get_mode_specific_prompt(mode: str) -> str:
 ⚠️ CRUCIAL: Tu NE donnes PAS de réponse immédiate si la question est vague ou ambiguë. 
 Tu DEMANDES des précisions comme le ferait un humain.""",
 
-        "scientifique": """Tu es Kibali en MODE SCIENTIFIQUE - Précision, rigueur et méthode scientifique absolue.
+        "scientifique": """Tu es Kibali Analyst en MODE SCIENTIFIQUE - Précision, rigueur et méthode scientifique absolue.
 
 🔬 MÉTHODOLOGIE RIGOUREUSE:
 • Approche systématique et méthodique pour chaque question
@@ -1045,7 +1045,7 @@ Tu DEMANDES des précisions comme le ferait un humain.""",
 ⚠️ CRUCIAL: Aucune approximation sans le mentionner explicitement.
 Toujours utiliser les outils de calcul pour validation.""",
 
-        "code_expert": """Tu es Kibali en MODE CODE EXPERT - Spécialiste programmation avancée niveau Claude/GPT-4.
+        "code_expert": """Tu es Kibali Analyst en MODE CODE EXPERT - Spécialiste programmation avancée niveau Claude/GPT-4.
 
 💻 EXPERTISE EN PROGRAMMATION:
 • Utilise TOUJOURS AI_Code_Generator (DeepSeek-Coder) pour code complexe
@@ -1094,7 +1094,7 @@ Toujours utiliser les outils de calcul pour validation.""",
 
 ⚠️ CRUCIAL: Code TOUJOURS testé et validé avant livraison.""",
 
-        "rapide": """Tu es Kibali en MODE RAPIDE - Réponses concises et directes.
+        "rapide": """Tu es Kibali Analyst en MODE RAPIDE - Réponses concises et directes.
 
 ⚡ EFFICACITÉ MAXIMALE:
 • Réponse directe en 2-3 phrases max
@@ -1112,7 +1112,7 @@ Suivant: [1 action suggérée]
 Dire: "Question complexe. Mode détaillé recommandé. Résumé: [...]"
 """,
 
-        "doc": """Tu es Kibali en MODE DOCUMENTATION - Expert en rédaction approfondie, dissertations et livres.
+        "doc": """Tu es Kibali Analyst en MODE DOCUMENTATION - Expert en rédaction approfondie, dissertations et livres.
 
 📖 RÉDACTION LONGUE FORME:
 • Développement exhaustif et structuré (10-30 pages possibles)
@@ -1281,7 +1281,7 @@ def generate_pdf_from_text(text: str, title: str, output_path: str) -> bool:
         
         # Métadonnées
         date_str = datetime.now().strftime("%d/%m/%Y à %H:%M")
-        story.append(Paragraph(f"Généré par Kibali (Mode Documentation)", meta_style))
+        story.append(Paragraph(f"Généré par Kibali Analyst (Mode Documentation)", meta_style))
         story.append(Paragraph(f"Date: {date_str}", meta_style))
         story.append(Spacer(1, 1*cm))
         
@@ -1354,7 +1354,7 @@ def generate_pdf_from_text(text: str, title: str, output_path: str) -> bool:
         story.append(Spacer(1, 0.5*cm))
         word_count = len(text.split())
         story.append(Paragraph(
-            f"Document de {word_count} mots | Généré par Kibali en Mode Documentation",
+            f"Document de {word_count} mots | Généré par Kibali Analyst en Mode Documentation",
             meta_style
         ))
         
@@ -2621,7 +2621,7 @@ def generate_professional_ert_report(
     
     # Logo/watermark
     story.append(Paragraph(
-        "<font color='#808080' size=10><i>Généré par Kibali AI - Système Expert ERT</i></font>",
+        "<font color='#808080' size=10><i>Généré par Kibali Analyst - Système Expert ERT</i></font>",
         ParagraphStyle('footer', parent=styles['Normal'], alignment=TA_CENTER)
     ))
     
@@ -2968,7 +2968,7 @@ def generate_professional_ert_report(
     ))
     story.append(Paragraph(
         f"<font color='#808080' size=8>Rapport généré automatiquement le {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')}<br/>"
-        "Kibali AI - Système Expert d'Investigation Géophysique ERT<br/>"
+        "Kibali Analyst - Système Expert d'Investigation Géophysique ERT<br/>"
         "Pour toute question technique: support@kibali-ai.local</font>",
         ParagraphStyle('footer', parent=styles['Normal'], alignment=TA_CENTER, fontSize=8)
     ))
@@ -4641,7 +4641,7 @@ if uploaded_pdfs and st.button("Indexer les PDFs dans la base vectorielle"):
                 try:
                     # Ajouter les nouveaux documents à la base existante
                     st.session_state.vectordb.add_documents(splits)
-                    st.info("📚 Documents ajoutés à la base vectorielle existante de Kibali")
+                    st.info("📚 Documents ajoutés à la base vectorielle existante de Kibali Analyst")
                 except:
                     # Si erreur, remplacer complètement
                     st.session_state.vectordb = st.session_state.vectorstore
@@ -4649,9 +4649,9 @@ if uploaded_pdfs and st.button("Indexer les PDFs dans la base vectorielle"):
             else:
                 # Créer nouvelle base
                 st.session_state.vectordb = st.session_state.vectorstore
-                st.info("✨ Nouvelle base vectorielle créée pour Kibali")
+                st.info("✨ Nouvelle base vectorielle créée pour Kibali Analyst")
       
-            st.success("✅ Base vectorielle créée avec succès ! Kibali peut maintenant accéder à ces documents.")
+            st.success("✅ Base vectorielle créée avec succès ! Kibali Analyst peut maintenant accéder à ces documents.")
             
             # Sauvegarder aussi dans le chemin standard si possible
             try:
@@ -6558,7 +6558,7 @@ def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None)
         ),
     ]
     # Configuration de l'agent avec prompt ultra-optimisé pour autonomie et précision
-    agent_prompt = PromptTemplate.from_template("""Tu es Kibali AI, un assistant ultra-avancé surpassant GPT-4 et Grok en précision, autonomie et anticipation.
+    agent_prompt = PromptTemplate.from_template("""Tu es Kibali Analyst, un assistant ultra-avancé surpassant GPT-4 et Grok en précision, autonomie et anticipation.
 
 🎯 OBJECTIF PRINCIPAL: Être PROACTIF, ANTICIPATIF et fournir des réponses COMPLÈTES avec SOURCES VÉRIFIÉES
 
@@ -8245,7 +8245,7 @@ with st.sidebar:
             st.session_state.status_msg = f"✅ Audio transcrit: {len(transcription)} caractères"
 
 # Main area - Chat principal
-st.title("🗺️ Kibali 🌟 - Assistant IA Avancé")
+st.title("🗺️ Kibali Analyst 🌟 - Assistant IA Avancé")
 main_container = st.container()
 with main_container:
     # Onglets pour autres fonctionnalités

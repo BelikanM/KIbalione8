@@ -1,4 +1,4 @@
-# 🤖 Kibali AI - Assistant Ultra-AvancéParfait ! On peut construire un **agent LangChain puissant** qui combine plusieurs modèles open source de codage en local, pour exploiter leurs points forts respectifs **en temps réel**. L’idée est de créer un pipeline où chaque modèle peut être appelé selon le type de tâche, et d’avoir une interface pour gérer tout ça via **LM Studio / Ollama**. Voici comment on peut organiser ça.
+# 🤖 Kibali Analyst - Assistant Ultra-AvancéParfait ! On peut construire un **agent LangChain puissant** qui combine plusieurs modèles open source de codage en local, pour exploiter leurs points forts respectifs **en temps réel**. L’idée est de créer un pipeline où chaque modèle peut être appelé selon le type de tâche, et d’avoir une interface pour gérer tout ça via **LM Studio / Ollama**. Voici comment on peut organiser ça.
 
 
 
@@ -6,7 +6,7 @@
 
 
 
-**Kibali AI** est un assistant IA ultra-avancé qui surpasse GPT-4 et Grok en :## 1️⃣ Architecture générale
+**Kibali Analyst** est un assistant IA ultra-avancé qui surpasse GPT-4 et Grok en :## 1️⃣ Architecture générale
 
 - ✅ **Précision** - Utilisation d'outils spécialisés pour chaque domaine
 
@@ -171,7 +171,7 @@ streamlit run ERT.py --server.port 8508
 
 ## 📊 Comparaison GPT-4/Grok
 
-| Critère | GPT-4 | Grok | **Kibali AI** |
+| Critère | GPT-4 | Grok | **Kibali Analyst** |
 |---------|-------|------|---------------|
 | Code Quality | ★★★★☆ | ★★★★☆ | ★★★★★ |
 | Binary Analysis | ★★☆☆☆ | ★★☆☆☆ | ★★★★★ |

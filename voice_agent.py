@@ -12,7 +12,7 @@ import tempfile
 import time
 
 class VoiceAgent:
-    """Agent vocal pour Kibali avec Whisper + Coqui TTS"""
+    """Agent vocal pour Kibali Analyst avec Whisper + Coqui TTS"""
     
     def __init__(self, 
                  whisper_model: str = "base",
@@ -364,6 +364,6 @@ if __name__ == '__main__':
     agent2 = VoiceAgent()
     
     if agent2.load_models(load_whisper=False, load_tts=True):
-        text_to_speak = "Bonjour, je suis Kibali, votre assistant vocal intelligent."
+        text_to_speak = "Bonjour, je suis Kibali Analyst, votre assistant vocal intelligent."
         audio_file = agent2.synthesize_speech(text_to_speak, play=True)
         print(f"\n✅ Audio généré: {audio_file}")
