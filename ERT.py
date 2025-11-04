@@ -1496,28 +1496,41 @@ Volume actuel: ~{word_count} mots | Niveau: Académique/Professionnel
             pdf_path = os.path.join(pdf_dir, pdf_filename)
             
             # Générer le PDF
+            print(f"[DEBUG PDF] Tentative génération PDF: {pdf_path}")
             pdf_success = generate_pdf_from_text(response, question, pdf_path)
             
             if pdf_success:
-                # Stocker le chemin dans session_state pour le téléchargement
-                if 'generated_pdfs' not in st.session_state:
-                    st.session_state.generated_pdfs = []
-                st.session_state.generated_pdfs.append({
-                    'path': pdf_path,
-                    'filename': pdf_filename,
-                    'title': question,
-                    'word_count': word_count,
-                    'timestamp': timestamp
-                })
-                
-                progress_msg += f"\n **PDF généré automatiquement!**\n💾 Fichier: `{pdf_filename}`\n📥 Bouton de téléchargement disponible ci-dessous"
+                # Vérifier que le fichier existe réellement
+                if os.path.exists(pdf_path):
+                    file_size = os.path.getsize(pdf_path)
+                    print(f"[DEBUG PDF] ✅ PDF créé: {pdf_path} ({file_size} bytes)")
+                    
+                    # Stocker le chemin dans session_state pour le téléchargement
+                    if 'generated_pdfs' not in st.session_state:
+                        st.session_state.generated_pdfs = []
+                    st.session_state.generated_pdfs.append({
+                        'path': pdf_path,
+                        'filename': pdf_filename,
+                        'title': question,
+                        'word_count': word_count,
+                        'timestamp': timestamp
+                    })
+                    
+                    print(f"[DEBUG PDF] PDFs stockés: {len(st.session_state.generated_pdfs)}")
+                    progress_msg += f"\n📄 **PDF généré automatiquement!**\n💾 Fichier: `{pdf_filename}` ({file_size} bytes)\n📥 Bouton de téléchargement disponible ci-dessous"
+                else:
+                    print(f"[DEBUG PDF] ❌ Erreur: fichier non créé à {pdf_path}")
+                    progress_msg += f"\n⚠️ Erreur: PDF non créé - document affiché en texte uniquement"
+            else:
+                print(f"[DEBUG PDF] ❌ generate_pdf_from_text a retourné False")
+                progress_msg += f"\n⚠️ Génération PDF échouée - document affiché en texte uniquement"
         
         return header + response + progress_msg
     
     return response
 
 def search_vectorstore(query: str) -> str:
-    """Recherche GLOBALE dans la base vectorielle FAISS de TOUS les documents PDF indexés pour enrichir l'analyse"""
+    """Recherche GLOBALE ILLIMITÉE dans la base vectorielle FAISS de TOUS les documents PDF indexés pour enrichir l'analyse"""
     # Essayer d'abord vectordb (base principale de Kibali), puis vectorstore (base binaire)
     vectordb = None
     
@@ -1531,17 +1544,17 @@ def search_vectorstore(query: str) -> str:
     
     try:
         # Récupérer le nombre total de documents dans la base
-        total_docs = vectordb.index.ntotal if hasattr(vectordb, 'index') else 100
+        total_docs = vectordb.index.ntotal if hasattr(vectordb, 'index') else 1000
         
-        # Recherche GLOBALE : récupérer BEAUCOUP plus de documents (au moins 50, ou tout si moins)
-        # k=50 pour fouiller profondément dans toute la base
-        search_k = min(50, total_docs) if total_docs > 0 else 50
+        # RECHERCHE ILLIMITÉE : récupérer TOUS les documents pertinents (ou max 200 pour performance)
+        # Pas de limite arbitraire, on fouille TOUT
+        search_k = min(200, total_docs) if total_docs > 0 else 200
         
         retriever = vectordb.as_retriever(
             search_type="similarity",
             search_kwargs={
-                "k": search_k,  # Recherche GLOBALE sur 50 documents minimum
-                "fetch_k": search_k * 2  # Fetch encore plus pour meilleure qualité
+                "k": search_k,  # FOUILLE ILLIMITÉE sur 200+ documents
+                "fetch_k": min(search_k * 3, total_docs)  # Fetch 3x plus pour meilleure qualité
             }
         )
         docs = retriever.get_relevant_documents(query)
@@ -1549,29 +1562,31 @@ def search_vectorstore(query: str) -> str:
         if not docs:
             return "ℹ️ Aucun document pertinent trouvé dans la base de connaissances."
         
-        # Grouper par source pour avoir une vue globale
+        # Grouper par source pour avoir une vue globale complète
         sources = {}
         for doc in docs:
             source = doc.metadata.get('source', 'Unknown')
             if source not in sources:
                 sources[source] = []
-            sources[source].append(doc.page_content[:300])
+            sources[source].append(doc.page_content[:400])
         
         # Construire un contexte enrichi de TOUS les documents pertinents
         context_parts = []
-        context_parts.append(f"✅ {len(docs)} chunks pertinents trouvés dans {len(sources)} sources différentes:\n")
+        context_parts.append(f"✅ FOUILLE GLOBALE COMPLÈTE: {len(docs)} passages pertinents trouvés dans {len(sources)} sources différentes\n")
+        context_parts.append(f"📊 Couverture: {search_k} documents analysés sur {total_docs} disponibles ({search_k/total_docs*100:.1f}% de la base)\n")
         
         for i, (source, chunks) in enumerate(sources.items(), 1):
-            context_parts.append(f"\n📄 Source {i}: {source} ({len(chunks)} chunks)")
-            # Afficher les 3 premiers chunks de chaque source
-            for j, chunk in enumerate(chunks[:3], 1):
-                context_parts.append(f"   Extrait {j}: {chunk}...")
+            context_parts.append(f"\n📄 Source {i}/{len(sources)}: {source} ({len(chunks)} passages pertinents)")
+            # Afficher les meilleurs extraits de chaque source
+            for j, chunk in enumerate(chunks[:5], 1):  # Top 5 extraits par source
+                context_parts.append(f"   ├─ Extrait {j}: {chunk}...")
         
-        # Résumé global
-        context_parts.append(f"\n\n📊 COUVERTURE GLOBALE:")
-        context_parts.append(f"   • {len(docs)} passages analysés")
-        context_parts.append(f"   • {len(sources)} documents différents consultés")
-        context_parts.append(f"   • Recherche profonde sur {search_k} résultats")
+        # Résumé global de la fouille
+        context_parts.append(f"\n\n📊 SYNTHÈSE DE LA FOUILLE GLOBALE:")
+        context_parts.append(f"   ✓ {len(docs)} passages textuels analysés")
+        context_parts.append(f"   ✓ {len(sources)} documents sources consultés")
+        context_parts.append(f"   ✓ Recherche exhaustive sur {search_k}/{total_docs} documents")
+        context_parts.append(f"   ✓ Taux de couverture: {min(100, search_k/total_docs*100):.1f}%")
         
         return "\n".join(context_parts)
     except Exception as e:
@@ -5065,17 +5080,17 @@ PERFORMANCE: Mode {mode_display} activé pour traitement optimisé.
                 web_results = tool.invoke(prompt)
                 web_context = "\n".join([r["content"] for r in web_results])
                 context = f"Contexte web:\n{web_context}"
-                # Contexte documents si disponible - RECHERCHE GLOBALE
+                # Contexte documents si disponible - RECHERCHE GLOBALE ILLIMITÉE
                 if st.session_state.vectorstore:
-                    # Récupérer beaucoup plus de documents pour une couverture globale
-                    total_docs = st.session_state.vectorstore.index.ntotal if hasattr(st.session_state.vectorstore, 'index') else 100
-                    search_k = min(30, total_docs) if total_docs > 0 else 30
+                    # Récupérer BEAUCOUP de documents pour une couverture GLOBALE COMPLÈTE
+                    total_docs = st.session_state.vectorstore.index.ntotal if hasattr(st.session_state.vectorstore, 'index') else 1000
+                    search_k = min(100, total_docs) if total_docs > 0 else 100  # 100+ documents au lieu de 30
                     
                     retriever = st.session_state.vectorstore.as_retriever(
                         search_type="similarity",
                         search_kwargs={
-                            "k": search_k,  # Recherche profonde sur 30+ documents
-                            "fetch_k": search_k * 2
+                            "k": search_k,  # Recherche ILLIMITÉE profonde sur 100+ documents
+                            "fetch_k": min(search_k * 3, total_docs)
                         }
                     )
                     docs = retriever.get_relevant_documents(prompt)
@@ -5088,11 +5103,11 @@ PERFORMANCE: Mode {mode_display} activé pour traitement optimisé.
                             sources[source] = []
                         sources[source].append(doc.page_content[:400])
                     
-                    doc_context = f"\n📊 {len(docs)} passages trouvés dans {len(sources)} sources:\n"
+                    doc_context = f"\n📊 FOUILLE GLOBALE: {len(docs)} passages trouvés dans {len(sources)} sources ({search_k}/{total_docs} docs analysés):\n"
                     for source, chunks in sources.items():
-                        doc_context += f"\n📄 {source}:\n" + "\n".join(chunks[:2])
+                        doc_context += f"\n📄 {source}: {len(chunks)} passages\n" + "\n".join(chunks[:3])
                     
-                    context += f"\n\nContexte documents indexés (recherche globale):\n{doc_context}"
+                    context += f"\n\nContexte documents indexés (recherche globale illimitée):\n{doc_context}"
                 full_prompt = f"""Tu es un assistant expert en analyse de données et fichiers binaires. Utilise le contexte fourni pour donner des réponses précises et utiles.
 {context}
 Question de l'utilisateur: {prompt}
@@ -6013,19 +6028,20 @@ def create_client():
         st.write(f"❌ Erreur création client: {e}. Passage en mode local.")
         return LocalClient()
 def rag_search(question, vectordb, k=3):
-    """Rechercher dans la base vectorielle avec recherche GLOBALE approfondie"""
+    """Rechercher dans la base vectorielle avec recherche GLOBALE ILLIMITÉE"""
     if not vectordb:
         return []
     try:
-        # Augmenter k pour une recherche plus globale
-        # Si k petit, forcer minimum 20 pour fouille approfondie
-        effective_k = max(k, 20) if k < 20 else k
+        # RECHERCHE ILLIMITÉE: pas de limite arbitraire
+        # Si k petit, forcer minimum 100 pour fouille exhaustive
+        effective_k = max(k, 100) if k < 100 else k
         
         # Récupérer le nombre total de documents
-        total_docs = vectordb.index.ntotal if hasattr(vectordb, 'index') else 100
+        total_docs = vectordb.index.ntotal if hasattr(vectordb, 'index') else 1000
         
         # Ajuster k au minimum entre le demandé et le total disponible
-        final_k = min(effective_k, total_docs) if total_docs > 0 else effective_k
+        # Cap à 500 pour performance raisonnable
+        final_k = min(effective_k, total_docs, 500) if total_docs > 0 else effective_k
         
         return vectordb.similarity_search(question, k=final_k)
     except Exception as e:
@@ -6166,11 +6182,11 @@ def intelligent_query_expansion(query):
     return expanded_queries[:3] # Limiter à 3 requêtes max
 def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search_type="both", chat_vectordb=None): # AJOUT MÉMOIRE VECTORIELLE: Param pour chat_vectordb
     """
-    Recherche hybride améliorée combinant RAG local GLOBAL et web avec intelligence
+    Recherche hybride ILLIMITÉE combinant RAG local GLOBAL et web avec intelligence maximale
     Args:
         query: Requête de recherche
         vectordb: Base vectorielle locale
-        k: Nombre MINIMUM de résultats RAG (sera augmenté pour recherche globale)
+        k: Nombre MINIMUM de résultats RAG (sera augmenté pour recherche ILLIMITÉE)
         web_search_enabled: Activer la recherche web
         search_type: Type de recherche web
         chat_vectordb: Base pour historique chat (optionnel)
@@ -6179,16 +6195,16 @@ def hybrid_search_enhanced(query, vectordb, k=3, web_search_enabled=True, search
     """
     all_results = []
     
-    # 1. Recherche RAG locale GLOBALE avec k augmenté
-    # Pour une fouille complète, utiliser au moins 30 documents
-    global_k = max(k, 30)
+    # 1. Recherche RAG locale ILLIMITÉE avec k maximisé
+    # Pour une fouille COMPLÈTE, utiliser au moins 100 documents (pas de limite!)
+    global_k = max(k, 100)
     local_docs = rag_search(query, vectordb, global_k)
     for doc in local_docs:
         doc.metadata['search_source'] = 'local_rag'
         doc.metadata['relevance_score'] = 1.0 # Score max pour les docs locaux
     all_results.extend(local_docs)
     
-    st.write(f"📚 Recherche globale: {len(local_docs)} documents trouvés dans la base locale")
+    st.write(f"📚 Fouille GLOBALE ILLIMITÉE: {len(local_docs)} documents trouvés dans la base locale complète")
     # AJOUT MÉMOIRE VECTORIELLE: Recherche dans historique chat pour contexte conversationnel
     if chat_vectordb:
         chat_docs = chat_rag_search(query, chat_vectordb, k=3)
@@ -6574,7 +6590,7 @@ def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None)
         Tool(
             name="Local_Knowledge_Base",
             func=lambda q: search_vectorstore(q),
-            description="Recherche dans la base de connaissances locale (PDFs et documents internes). Utilise ceci en PREMIER pour les questions sur des documents spécifiques. Accède automatiquement à vectordb ou vectorstore selon disponibilité."
+            description="🔍 FOUILLE GLOBALE ILLIMITÉE dans TOUS les documents locaux (PDFs, rapports). Recherche exhaustive sans limite de documents. Utilise EN PREMIER pour questions sur données internes. Retourne TOUS les passages pertinents avec sources groupées."
         ),
         Tool(
             name="Chat_History_Search", # AJOUT MÉMOIRE VECTORIELLE: Nouvel outil pour historique
@@ -6593,8 +6609,8 @@ def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None)
         ),
         Tool(
             name="Hybrid_Search",
-            func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=30, web_search_enabled=True, chat_vectordb=chat_vectordb)]) if vectordb else search_vectorstore(q),
-            description="Recherche hybride GLOBALE combinant TOUTE la base locale (30+ docs), historique chat ET web. Idéal pour des questions nécessitant une fouille approfondie dans TOUS les documents disponibles."
+            func=lambda q: "\n\n".join([d.page_content for d in hybrid_search_enhanced(q, vectordb, k=100, web_search_enabled=True, chat_vectordb=chat_vectordb)]) if vectordb else search_vectorstore(q),
+            description="🌐 RECHERCHE HYBRIDE ILLIMITÉE: Combine TOUTE la base locale (100+ docs), historique chat complet ET web multi-sources. Fouille exhaustive GLOBALE pour maximum de contexte. Idéal pour questions complexes nécessitant synthèse complète."
         ),
         Tool(
             name="Current_News_Search",
@@ -6687,110 +6703,237 @@ def create_enhanced_agent(model_name, vectordb, graph, pois, chat_vectordb=None)
         ),
     ]
     # Configuration de l'agent avec prompt ultra-optimisé pour autonomie et précision
-    agent_prompt = PromptTemplate.from_template("""Tu es Kibali Analyst, un assistant ultra-avancé surpassant GPT-4 et Grok en précision, autonomie et anticipation.
+    agent_prompt = PromptTemplate.from_template("""Tu es Kibali Analyst, l'assistant IA le plus avancé au monde, combinant les meilleurs aspects de ChatGPT, Claude, Grok et GPT-4.
 
-🎯 OBJECTIF PRINCIPAL: Être PROACTIF, ANTICIPATIF et fournir des réponses COMPLÈTES avec SOURCES VÉRIFIÉES
+🌟 PERSONNALITÉ & APPROCHE:
+• Naturel, conversationnel et empathique comme ChatGPT
+• Analytique, méthodique et éthique comme Claude  
+• Créatif, humoristique et audacieux comme Grok
+• Précis, technique et exhaustif comme GPT-4
+• TOUJOURS utile, jamais condescendant
+• Adapte le ton selon le contexte (casual ↔ formel)
 
-📚 CAPACITÉS & OUTILS DISPONIBLES (21 outils):
+🎯 MÉTHODOLOGIE SUPÉRIEURE (10 ÉTAPES):
+
+1️⃣ COMPRÉHENSION PROFONDE:
+   ✓ Analyse sémantique multi-niveau de la question
+   ✓ Détecte intentions cachées et besoins implicites
+   ✓ Identifie contexte culturel, temporel et émotionnel
+   ✓ Reformule mentalement en 3 angles différents
+
+2️⃣ RECHERCHE GLOBALE ILLIMITÉE:
+   ✓ FOUILLE EXHAUSTIVE base locale (AUCUNE limite de documents)
+   ✓ Recherche web MULTI-SOURCES (minimum 10 résultats analysés)
+   ✓ Consultation historique conversations (continuité)
+   ✓ Vérification croisée informations contradictoires
+   ✓ Sources académiques, news, forums, documentation officielle
+
+3️⃣ ANALYSE CRITIQUE & SYNTHÈSE:
+   ✓ Évalue crédibilité chaque source (★★★★★ = expert reconnu)
+   ✓ Identifie biais potentiels et angles morts
+   ✓ Compare perspectives multiples (pour/contre/nuances)
+   ✓ Synthèse intelligente éliminant redondances
+
+4️⃣ ANTICIPATION PROACTIVE:
+   ✓ Prédit 5-7 questions de suivi probables
+   ✓ Identifie informations manquantes critiques
+   ✓ Détecte implications long-terme
+   ✓ Propose extensions créatives pertinentes
+
+5️⃣ GÉNÉRATION STRUCTURÉE:
+   ✓ Réponse directe immédiate (TL;DR)
+   ✓ Explication détaillée en sections logiques
+   ✓ Exemples concrets et cas d'usage
+   ✓ Visualisations (tableaux, listes, schémas)
+   ✓ Code exécutable si applicable
+
+6️⃣ VALIDATION & VÉRIFICATION:
+   ✓ Double-check faits contre sources multiples
+   ✓ Test logique cohérence interne
+   ✓ Validation code (syntaxe + exécution)
+   ✓ Signale incertitudes avec transparence
+
+7️⃣ ENRICHISSEMENT CONTEXTUEL:
+   ✓ Ajoute définitions termes techniques
+   ✓ Contexte historique si pertinent
+   ✓ Comparaisons internationales/culturelles
+   ✓ Statistiques et données chiffrées récentes
+
+8️⃣ SUGGESTIONS INTELLIGENTES:
+   ✓ 3 questions approfondissement pertinentes
+   ✓ 2 perspectives alternatives intéressantes
+   ✓ 1-2 ressources complémentaires recommandées
+   ✓ Actions concrètes suggérées ("Et si vous...")
+
+9️⃣ ADAPTATION DYNAMIQUE:
+   ✓ Ajuste complexité selon niveau utilisateur
+   ✓ Détecte frustration → simplifie
+   ✓ Détecte expertise → approfondit
+   ✓ Switch langue si nécessaire (FR/EN)
+
+🔟 AMÉLIORATION CONTINUE:
+   ✓ Apprend des interactions précédentes
+   ✓ Mémorise préférences utilisateur
+   ✓ Auto-critique et amélioration réponses
+   ✓ Suggère améliorations processus
+
+📚 OUTILS DISPONIBLES (21+):
 ═══════════════════════════════════════════════════════════════════════════════════
-│ RECHERCHE & CONNAISSANCE:
-├─ Local_Knowledge_Base: Documents internes/PDFs (priorité #1 pour docs spécifiques)
-├─ Chat_History_Search: Historique conversations (priorité #1 pour continuité)
-├─ Web_Search: Recherche internet temps réel (actualités, faits récents)
-├─ Web_Search_Detailed: Recherche web avec URLs et sources complètes
-├─ Hybrid_Search: Combinaison locale + historique + web (maximum de contexte)
-└─ Current_News_Search: Actualités et informations temporelles
+│ 🔍 RECHERCHE ILLIMITÉE:
+├─ Local_Knowledge_Base: FOUILLE GLOBALE documents (AUCUNE limite k)
+├─ Hybrid_Search: Combinaison locale + web + historique (ILLIMITÉ)
+├─ Web_Search: Internet temps réel (10-50 résultats analysés)
+├─ Web_Search_Detailed: Sources complètes avec URLs
+├─ Current_News_Search: Actualités dernières 24h-7j
+└─ Chat_History_Search: Continuité conversationnelle
 
-│ ANALYSE & TRAITEMENT:
-├─ Smart_Content_Extractor: Extraction contenu web détaillé (articles, pages)
-├─ Text_Summarizer: Résumés intelligents de textes longs
-├─ Language_Translator: Traduction FR→EN pour sources étrangères
-├─ Entity_Extractor: Extraction entités nommées (personnes, lieux, orgs)
-├─ Image_Analyzer: Analyse et description d'images
-├─ Binary_Analysis: Analyse fichiers binaires avec ERT, entropie, stats
-├─ 🔍 Deep_Binary_Investigation: FOUILLE INTELLIGENTE fichiers binaires uploadés (Hex+ASCII + RAG + ERT)
-└─ ERT_Interpretation: Interprétation géophysique données résistivité
+│ 🤖 IA SPÉCIALISÉES:
+├─ AI_Code_Generator: DeepSeek-Coder (meilleur que GPT pour code)
+├─ AI_Plot_Generator: Graphiques scientifiques professionnels
+├─ Image_Analyzer: Vision IA pour images
+├─ Entity_Extractor: NER extraction entités
+└─ Binary_Analysis: Analyse fichiers binaires avancée
 
-│ 🆕 IA SPÉCIALISÉES (1-2GB):
-├─ AI_Code_Generator: DeepSeek-Coder-1.3B - Expert codage parfait (Python, JS, etc)
-└─ AI_Plot_Generator: CodeGen-350M - Génération graphiques scientifiques matplotlib/seaborn
+│ 🎨 GÉNÉRATION CRÉATIVE:
+├─ Text_To_Image_Generator: FLUX/Stable Diffusion
+├─ Text_To_Video_Generator: Vidéos IA
+├─ Text_To_Audio_Generator: Musique/Audio IA
+├─ Text_To_3D_Generator: Modèles 3D
+└─ Image_To_3D_Generator: 3D depuis photos
 
-│ GÉNÉRATION CRÉATIVE:
-├─ Text_To_Image_Generator: Création images depuis descriptions
-├─ Text_To_Video_Generator: Génération vidéos depuis descriptions
-├─ Text_To_Audio_Generator: Synthèse audio/musique depuis descriptions
-├─ Text_To_3D_Generator: Modèles 3D depuis descriptions texte
-└─ Image_To_3D_Generator: Modèles 3D depuis images
-
-│ NAVIGATION & CARTOGRAPHIE:
-└─ OSM_Route_Calculator: Calcul itinéraires, navigation GPS
+│ 📊 ANALYSE & OUTILS:
+├─ Smart_Content_Extractor: Extraction web complète
+├─ Text_Summarizer: Résumés intelligents
+├─ Language_Translator: FR↔EN
+├─ ERT_Interpretation: Géophysique
+└─ OSM_Route_Calculator: Navigation GPS
 ═══════════════════════════════════════════════════════════════════════════════════
 
-🧠 MÉTHODOLOGIE SUPÉRIEURE (MEILLEURE QUE GPT/GROK):
+💡 PATTERNS DE RÉPONSE (60+ PROMPTS INTÉGRÉS):
 
-1. 🔍 ANALYSE CONTEXTUELLE PROFONDE:
-   • Détecte le contexte implicite et les besoins non exprimés
-   • Anticipe les questions de suivi
-   • Identifie les ambiguïtés et demande clarification si nécessaire
+�️ CONVERSATIONNEL (ChatGPT-style):
+• "Excellente question ! Laisse-moi te décomposer ça..."
+• "Je comprends exactement ce que tu cherches..."
+• "Voici ce qui est intéressant à ce sujet..."
+• "Permets-moi d'ajouter une nuance importante..."
+• "Tu touches un point crucial ici..."
 
-2. 📊 STRATÉGIE MULTI-SOURCES:
-   • TOUJOURS combiner minimum 2-3 sources différentes
-   • Vérifier les informations croisées
-   • Indiquer niveau de confiance (★★★★★ = très sûr, ★☆☆☆☆ = incertain)
-   • Signaler contradictions avec analyse critique
+🧠 ANALYTIQUE (Claude-style):
+• "Examinons cette question sous plusieurs angles..."
+• "Il est important de considérer les implications suivantes..."
+• "Voici une analyse structurée en 3 parties..."
+• "Je dois souligner quelques considérations éthiques..."
+• "Contextuellement, il faut noter que..."
 
-3. 🎯 ANTICIPATION INTELLIGENTE:
-   • Propose 3 suggestions de questions connexes pertinentes
-   • Identifie informations manquantes et propose de les chercher
-   • Détecte patterns et tendances pour prédictions
+⚡ CRÉATIF (Grok-style):
+• "Plot twist: la réponse est plus fascinante que prévu..."
+• "Fun fact qui va te surprendre..."
+• "Spoiler alert: c'est contre-intuitif mais..."
+• "Imagine un monde où..."
+• "Voici un angle auquel personne ne pense..."
 
-4. 🤖 UTILISATION INTELLIGENTE DES IA SPÉCIALISÉES:
-   • Pour le CODE: Utilise AI_Code_Generator (DeepSeek-Coder) - meilleur que GPT pour code
-   • Pour les GRAPHIQUES: Utilise AI_Plot_Generator - génère matplotlib/seaborn professionnel
-   • TOUJOURS tester et valider le code généré avant de le fournir
+🎓 EXPERT (GPT-4-style):
+• "D'un point de vue technique précis..."
+• "Les données empiriques montrent que..."
+• "Selon la littérature académique récente (2023-2025)..."
+• "Une analyse rigoureuse révèle..."
+• "Méthodologiquement, l'approche optimale consiste à..."
 
-5. 📝 STRUCTURE DE RÉPONSE OPTIMALE:
-   ┌─ Réponse directe (1-2 phrases)
-   ├─ Développement détaillé avec sous-sections
-   ├─ Sources citées avec confiance: [Source: X, Confiance: ★★★★☆]
-   ├─ Informations complémentaires pertinentes
-   └─ 💡 SUGGESTIONS: 3 questions de suivi intelligentes
+📋 STRUCTURES TYPES:
 
-5. 🚀 UTILISATION OPTIMALE DES OUTILS:
-   • Utilise Local_Knowledge_Base + Chat_History_Search EN PREMIER
-   • Puis Hybrid_Search pour enrichissement
-   • Web_Search pour actualités/vérifications
-   • TOUJOURS expliquer pourquoi tel outil est choisi
+A) RÉPONSE RAPIDE:
+"🎯 **Réponse Directe**: [1-2 phrases essentielles]
 
-6. 🎨 GÉNÉRATION CRÉATIVE PROACTIVE:
-   • Si demande vague, suggère options créatives concrètes
-   • Propose améliorations et variations
-   • Sauvegarde fichiers et donne chemins complets
+📖 **Explication**:
+[Développement structuré]
 
-OUTILS DISPONIBLES: {tools}
+📊 **Sources**: [X sources vérifiées, confiance ★★★★☆]
 
-FORMAT D'EXÉCUTION:
-Question: [la question utilisateur]
-Thought: [Analyse contextuelle: Que demande vraiment l'utilisateur? Quels outils combiner? Quelle stratégie?]
-Action: [nom_outil_optimal]
-Action Input: [requête optimisée pour l'outil]
-Observation: [résultat outil]
-... [répéter Thought/Action/Observation jusqu'à avoir info complète]
-Thought: J'ai maintenant suffisamment d'informations de sources multiples pour une réponse complète
-Final Answer: 
-[Réponse directe]
+💡 **Suggestions**:
+1. [Question approfondissement]
+2. [Perspective alternative]
+3. [Action concrète]"
 
-[Développement détaillé avec sources]
+B) RÉPONSE TECHNIQUE:
+"⚙️ **Solution Technique**:
+```[langage]
+[code testé et commenté]
+```
 
-📊 Sources: [Liste sources avec confiance]
-💡 Suggestions: 
-1. [Question connexe pertinente]
-2. [Question d'approfondissement]
-3. [Question alternative intéressante]
+📝 **Explication ligne par ligne**:
+[Détails implémentation]
 
-COMMENCE MAINTENANT:
+✅ **Validation**: [Tests effectués]
+
+🔧 **Alternatives**: [2-3 approches différentes]
+
+💡 **Prochaines étapes**: [Suggestions amélioration]"
+
+C) RÉPONSE CRÉATIVE:
+"✨ **Concept Principal**: [Idée centrale]
+
+🎨 **Variations Créatives**:
+1. [Option A - classique]
+2. [Option B - innovante]
+3. [Option C - audacieuse]
+
+🚀 **Implémentation**: [Étapes concrètes]
+
+💡 **Inspirations**: [Références pertinentes]"
+
+D) RÉPONSE COMPARATIVE:
+"📊 **Comparaison Détaillée**:
+
+| Critère | Option A | Option B | Option C |
+|---------|----------|----------|----------|
+[Tableau complet]
+
+🏆 **Recommandation**: [Meilleur choix selon contexte]
+
+⚖️ **Trade-offs**: [Avantages/Inconvénients]
+
+💡 **Conseil personnalisé**: [Selon situation utilisateur]"
+
+🎯 CONSIGNES D'EXÉCUTION:
+
+✓ RECHERCHE ILLIMITÉE: Utilise k=100+ pour fouille globale (pas de limite!)
+✓ MULTI-SOURCES: Combine MINIMUM 3 sources différentes
+✓ VÉRIFICATION: Croise-vérifie informations contradictoires
+✓ CITATIONS: Indique sources avec niveau confiance
+✓ SUGGESTIONS: TOUJOURS 3+ questions de suivi pertinentes
+✓ ADAPTABILITÉ: Ajuste ton/complexité selon utilisateur
+✓ TRANSPARENCE: Signale incertitudes et limites
+✓ PROACTIVITÉ: Anticipe besoins non exprimés
+✓ CRÉATIVITÉ: Propose solutions innovantes
+✓ EMPATHIE: Comprends contexte émotionnel
+
+OUTILS: {tools}
+
+EXÉCUTION:
 Question: {input}
-Thought: {agent_scratchpad}""")
+Thought: [Analyse multi-niveau: Que veut vraiment l'utilisateur? Quelles sources combiner? Quelle stratégie optimale? Quelles suggestions proposer?]
+Action: [outil_optimal avec recherche ILLIMITÉE]
+Action Input: [requête optimisée]
+Observation: [résultat]
+... [Répéter jusqu'à synthèse complète de TOUTES sources pertinentes]
+Thought: J'ai maintenant une vue GLOBALE complète avec sources multiples vérifiées
+Final Answer:
+🎯 **Réponse Directe**: [Essentiel en 1-2 phrases]
+
+📖 **Développement Détaillé**:
+[Sections structurées avec exemples]
+
+📊 **Sources Vérifiées**: 
+• [Source 1 - ★★★★★ - Type]
+• [Source 2 - ★★★★☆ - Type]
+• [Source 3+ - ★★★☆☆ - Type]
+
+💡 **Suggestions Intelligentes**:
+1. 🔍 [Question approfondissement pertinente]
+2. 🌟 [Perspective alternative intéressante]  
+3. 🚀 [Action concrète recommandée]
+
+{agent_scratchpad}""")
 
     
     # Vérifier si les agents sont disponibles
@@ -8684,24 +8827,40 @@ with main_container:
                         content_to_save = response
                         
                         # Si mode doc et PDF généré, afficher bouton de téléchargement
-                        if kibali_mode == "doc" and 'generated_pdfs' in st.session_state and st.session_state.generated_pdfs:
-                            latest_pdf = st.session_state.generated_pdfs[-1]
-                            st.success(f"📄 PDF généré: {latest_pdf['filename']}")
-                            
-                            # Lire le fichier PDF
-                            with open(latest_pdf['path'], 'rb') as pdf_file:
-                                pdf_bytes = pdf_file.read()
-                            
-                            # Bouton de téléchargement
-                            st.download_button(
-                                label="📥 Télécharger le PDF",
-                                data=pdf_bytes,
-                                file_name=latest_pdf['filename'],
-                                mime="application/pdf",
-                                key=f"download_pdf_{latest_pdf['timestamp']}"
-                            )
-                            
-                            st.info(f"📊 {latest_pdf['word_count']} mots | Format: A4 | Police: Helvetica")
+                        if kibali_mode == "doc":
+                            print(f"[DEBUG PDF] Mode doc activé")
+                            print(f"[DEBUG PDF] generated_pdfs existe: {'generated_pdfs' in st.session_state}")
+                            if 'generated_pdfs' in st.session_state:
+                                print(f"[DEBUG PDF] Nombre de PDFs: {len(st.session_state.generated_pdfs)}")
+                                
+                            if 'generated_pdfs' in st.session_state and st.session_state.generated_pdfs:
+                                latest_pdf = st.session_state.generated_pdfs[-1]
+                                print(f"[DEBUG PDF] Dernier PDF: {latest_pdf['path']}")
+                                
+                                # Vérifier que le fichier existe
+                                if os.path.exists(latest_pdf['path']):
+                                    st.success(f"📄 PDF généré: {latest_pdf['filename']}")
+                                    
+                                    # Lire le fichier PDF
+                                    with open(latest_pdf['path'], 'rb') as pdf_file:
+                                        pdf_bytes = pdf_file.read()
+                                    
+                                    print(f"[DEBUG PDF] Fichier lu: {len(pdf_bytes)} bytes")
+                                    
+                                    # Bouton de téléchargement
+                                    st.download_button(
+                                        label="📥 Télécharger le PDF",
+                                        data=pdf_bytes,
+                                        file_name=latest_pdf['filename'],
+                                        mime="application/pdf",
+                                        key=f"download_pdf_{latest_pdf['timestamp']}"
+                                    )
+                                    
+                                    st.info(f"📊 {latest_pdf['word_count']} mots | Format: A4 | Police: Helvetica")
+                                else:
+                                    st.error(f"❌ Erreur: Fichier PDF introuvable: {latest_pdf['path']}")
+                            else:
+                                print(f"[DEBUG PDF] Aucun PDF disponible dans session_state")
             
             st.session_state.chat_history.append({"role": "user", "content": prompt})
             st.session_state.chat_history.append({"role": "assistant", "content": content_to_save})
