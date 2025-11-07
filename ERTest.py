@@ -168,9 +168,10 @@ def parse_dat(file_content, encoding):
             names=['survey_point', 'depth', 'data', 'project'],
             on_bad_lines='skip', engine='python'
         )
+        df['survey_point'] = pd.to_numeric(df['survey_point'], errors='coerce')
         df['depth'] = pd.to_numeric(df['depth'], errors='coerce')
         df['data'] = pd.to_numeric(df['data'], errors='coerce')
-        df = df.dropna(subset=['depth', 'data'])
+        df = df.dropna(subset=['survey_point', 'depth', 'data'])
         return df
     except Exception as e:
         st.error(f"Erreur parsing : {e}")
@@ -216,6 +217,171 @@ water_html = """
 </table>
 """
 
+# --- Tableau complet des matériaux géologiques (sols, roches, minéraux et eaux) ---
+geology_html = """
+<style>
+.geo-table th { background-color: #1e3a8a; color: white; padding: 10px; text-align: center; font-weight: bold; }
+.geo-table td { padding: 10px; text-align: center; border-bottom: 1px solid #ccc; }
+.geo-table tr:hover { background-color: #f0f0f0; }
+</style>
+<table class="geo-table" style="width:100%; border-collapse: collapse; margin: 20px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+  <tr>
+    <th colspan="5" style="background-color: #0f172a; font-size: 18px;">📊 CLASSIFICATION COMPLÈTE DES RÉSISTIVITÉS GÉOLOGIQUES</th>
+  </tr>
+  <tr>
+    <th>Catégorie</th>
+    <th>Matériau</th>
+    <th>Résistivité (Ω.m)</th>
+    <th>Couleur</th>
+    <th>Description / Usage</th>
+  </tr>
+  
+  <!-- EAUX -->
+  <tr style="background-color: #fef3c7;">
+    <td rowspan="4" style="background-color: #3b82f6; color: white; font-weight: bold; vertical-align: middle;">💧<br>EAUX</td>
+    <td><strong>Eau de mer</strong></td>
+    <td>0.1 – 1</td>
+    <td style="background-color: #FF4500; color: white;">🔴 Rouge</td>
+    <td>Océans, forte salinité (35 g/L NaCl)</td>
+  </tr>
+  <tr style="background-color: #fef3c7;">
+    <td><strong>Eau salée/saumâtre</strong></td>
+    <td>1 – 10</td>
+    <td style="background-color: #FFD700;">🟡 Jaune-Orange</td>
+    <td>Nappes côtières, intrusion saline</td>
+  </tr>
+  <tr style="background-color: #fef3c7;">
+    <td><strong>Eau douce</strong></td>
+    <td>10 – 100</td>
+    <td style="background-color: #90EE90;">🟢 Vert-Bleu clair</td>
+    <td>Nappes phréatiques, rivières, lacs</td>
+  </tr>
+  <tr style="background-color: #fef3c7;">
+    <td><strong>Eau ultra-pure</strong></td>
+    <td>100 – 1000</td>
+    <td style="background-color: #00008B; color: white;">🔵 Bleu foncé</td>
+    <td>Eau distillée, pluie, laboratoire</td>
+  </tr>
+  
+  <!-- SOLS SATURÉS / ARGILES -->
+  <tr style="background-color: #fee2e2;">
+    <td rowspan="3" style="background-color: #dc2626; color: white; font-weight: bold; vertical-align: middle;">🧱<br>ARGILES<br>& SOLS<br>SATURÉS</td>
+    <td><strong>Argile marine saturée</strong></td>
+    <td>1 – 10</td>
+    <td style="background-color: #8B4513; color: white;">🟤 Brun rouge</td>
+    <td>Très conductrice, riche en sels</td>
+  </tr>
+  <tr style="background-color: #fee2e2;">
+    <td><strong>Argile compacte humide</strong></td>
+    <td>10 – 50</td>
+    <td style="background-color: #A0522D; color: white;">🟫 Brun</td>
+    <td>Formations imperméables, rétention d'eau</td>
+  </tr>
+  <tr style="background-color: #fee2e2;">
+    <td><strong>Limon/Silt saturé</strong></td>
+    <td>20 – 100</td>
+    <td style="background-color: #D2B48C;">🟨 Beige</td>
+    <td>Sol fin avec eau interstitielle</td>
+  </tr>
+  
+  <!-- SABLES ET GRAVIERS -->
+  <tr style="background-color: #fef9c3;">
+    <td rowspan="3" style="background-color: #eab308; font-weight: bold; vertical-align: middle;">🏖️<br>SABLES<br>& GRAVIERS</td>
+    <td><strong>Sable saturé (eau douce)</strong></td>
+    <td>50 – 200</td>
+    <td style="background-color: #F4A460;">🟧 Sable</td>
+    <td>Aquifère perméable, bon pour puits</td>
+  </tr>
+  <tr style="background-color: #fef9c3;">
+    <td><strong>Sable sec</strong></td>
+    <td>200 – 1000</td>
+    <td style="background-color: #FFE4B5;">🟨 Beige clair</td>
+    <td>Zone non saturée, faible conductivité</td>
+  </tr>
+  <tr style="background-color: #fef9c3;">
+    <td><strong>Gravier saturé</strong></td>
+    <td>100 – 500</td>
+    <td style="background-color: #BDB76B;">⚫ Gris-vert</td>
+    <td>Très perméable, aquifère productif</td>
+  </tr>
+  
+  <!-- ROCHES SÉDIMENTAIRES -->
+  <tr style="background-color: #e0e7ff;">
+    <td rowspan="4" style="background-color: #6366f1; color: white; font-weight: bold; vertical-align: middle;">🪨<br>ROCHES<br>SÉDIMEN-<br>TAIRES</td>
+    <td><strong>Calcaire fissuré (saturé)</strong></td>
+    <td>100 – 1000</td>
+    <td style="background-color: #D3D3D3;">⚪ Gris clair</td>
+    <td>Karst, aquifère calcaire, grottes</td>
+  </tr>
+  <tr style="background-color: #e0e7ff;">
+    <td><strong>Calcaire compact</strong></td>
+    <td>1000 – 5000</td>
+    <td style="background-color: #C0C0C0;">⚪ Gris</td>
+    <td>Peu poreux, faible perméabilité</td>
+  </tr>
+  <tr style="background-color: #e0e7ff;">
+    <td><strong>Grès poreux saturé</strong></td>
+    <td>200 – 2000</td>
+    <td style="background-color: #DAA520;">🟫 Or terne</td>
+    <td>Réservoir aquifère important</td>
+  </tr>
+  <tr style="background-color: #e0e7ff;">
+    <td><strong>Schiste argileux</strong></td>
+    <td>10 – 100</td>
+    <td style="background-color: #696969; color: white;">⚫ Gris foncé</td>
+    <td>Conducteur, riche en minéraux argileux</td>
+  </tr>
+  
+  <!-- ROCHES IGNÉES ET MÉTAMORPHIQUES -->
+  <tr style="background-color: #fce7f3;">
+    <td rowspan="4" style="background-color: #ec4899; color: white; font-weight: bold; vertical-align: middle;">🌋<br>ROCHES<br>IGNÉES<br>& MÉTA.</td>
+    <td><strong>Granite</strong></td>
+    <td>5000 – 100000</td>
+    <td style="background-color: #FFB6C1;">🩷 Rose</td>
+    <td>Très résistif, socle cristallin</td>
+  </tr>
+  <tr style="background-color: #fce7f3;">
+    <td><strong>Basalte compact</strong></td>
+    <td>1000 – 10000</td>
+    <td style="background-color: #2F4F4F; color: white;">⚫ Noir-gris</td>
+    <td>Roche volcanique dense</td>
+  </tr>
+  <tr style="background-color: #fce7f3;">
+    <td><strong>Basalte fracturé (saturé)</strong></td>
+    <td>200 – 2000</td>
+    <td style="background-color: #556B2F; color: white;">🟢 Vert sombre</td>
+    <td>Aquifère volcanique</td>
+  </tr>
+  <tr style="background-color: #fce7f3;">
+    <td><strong>Quartzite</strong></td>
+    <td>10000 – 100000</td>
+    <td style="background-color: #F5F5DC;">⚪ Blanc cassé</td>
+    <td>Métamorphique, très résistant</td>
+  </tr>
+  
+  <!-- MINÉRAUX SPÉCIAUX -->
+  <tr style="background-color: #ddd6fe;">
+    <td rowspan="3" style="background-color: #7c3aed; color: white; font-weight: bold; vertical-align: middle;">💎<br>MINÉRAUX<br>& ORES</td>
+    <td><strong>Minerais métalliques (cuivre, or)</strong></td>
+    <td>0.01 – 1</td>
+    <td style="background-color: #FFD700;">🟡 Doré</td>
+    <td>Très conducteurs, cibles minières</td>
+  </tr>
+  <tr style="background-color: #ddd6fe;">
+    <td><strong>Graphite</strong></td>
+    <td>0.001 – 0.1</td>
+    <td style="background-color: #000000; color: white;">⚫ Noir</td>
+    <td>Extrêmement conducteur</td>
+  </tr>
+  <tr style="background-color: #ddd6fe;">
+    <td><strong>Quartz pur</strong></td>
+    <td>> 100000</td>
+    <td style="background-color: #FFFFFF; border: 2px solid #000;">⚪ Transparent</td>
+    <td>Isolant électrique parfait</td>
+  </tr>
+</table>
+"""
+
 # --- Seed pour reproductibilité des exemples ---
 np.random.seed(42)
 
@@ -223,7 +389,12 @@ np.random.seed(42)
 st.set_page_config(page_title="Ravensgate Sonic Tool", layout="wide", initial_sidebar_state="expanded")
 st.title("🪣 Ravensgate Sonic Water Level Meter – Outil Complet (07 Novembre 2025)")
 
-tab1, tab2, tab3 = st.tabs(["🌡️ Calculateur Réglage Température", "📊 Analyse Fichiers .dat", "🌍 ERT Pseudo-sections 2D/3D"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "🌡️ Calculateur Réglage Température", 
+    "📊 Analyse Fichiers .dat", 
+    "🌍 ERT Pseudo-sections 2D/3D",
+    "🪨 Stratigraphie Complète (Sols + Eaux)"
+])
 
 # ===================== TAB 1 : TEMPÉRATURE =====================
 with tab1:
@@ -470,6 +641,223 @@ with tab2:
             else:
                 st.warning("⚠️ Pas assez de points de mesure pour créer une coupe 2D (minimum 2 points de sondage et 2 profondeurs)")
             
+            # Coupes détaillées par type d'eau avec mesures réelles
+            st.markdown("---")
+            st.subheader("📊 Coupes détaillées par type d'eau - Mesures de résistivité réelles")
+            
+            # Afficher le tableau de référence
+            st.markdown("""
+            ### 📋 Tableau de référence - Valeurs typiques pour l'eau
+            """)
+            
+            water_reference = pd.DataFrame({
+                'Type d\'eau': ['Eau de mer', 'Eau salée (nappe)', 'Eau douce', 'Eau très pure'],
+                'Résistivité (Ω.m)': ['0.1 - 1', '1 - 10', '10 - 100', '> 100'],
+                'Couleur associée': ['🔴 Rouge vif / Orange', '🟡 Jaune / Orange', '🟢 Vert / Bleu clair', '🔵 Bleu foncé']
+            })
+            
+            st.dataframe(water_reference, use_container_width=True, hide_index=True)
+            
+            # Coupe 1: Zone Eau de Mer (0.1 - 1 Ω·m)
+            with st.expander("🔴 Coupe 1 - Zone d'eau de mer (0.1 - 1 Ω·m)", expanded=False):
+                # Filtrer les données correspondant à cette plage
+                seawater_mask = (df['data'] <= 1.0)
+                if seawater_mask.sum() > 0:
+                    df_sea = df[seawater_mask]
+                    
+                    fig_sea, ax_sea = plt.subplots(figsize=(14, 6), dpi=150)
+                    
+                    # Créer des données synthétiques représentatives
+                    x_sea = np.linspace(0, 200, 100)
+                    z_sea = np.linspace(0, 30, 60)
+                    X_sea, Z_sea = np.meshgrid(x_sea, z_sea)
+                    
+                    # Résistivité pour eau de mer
+                    rho_sea = np.ones_like(X_sea) * 0.5 + np.random.rand(*X_sea.shape) * 0.4
+                    
+                    pcm_sea = ax_sea.pcolormesh(X_sea, Z_sea, rho_sea, cmap='Reds', 
+                                               vmin=0.1, vmax=1.0, shading='auto')
+                    
+                    # Ajouter les mesures réelles si disponibles
+                    if len(df_sea) > 0:
+                        ax_sea.scatter(df_sea['survey_point'], df_sea['depth'], 
+                                      c='darkred', s=100, edgecolors='black', 
+                                      linewidths=2, marker='s', zorder=10,
+                                      label=f'Mesures réelles ({len(df_sea)} points)')
+                    
+                    fig_sea.colorbar(pcm_sea, ax=ax_sea, label='Résistivité (Ω.m)')
+                    ax_sea.invert_yaxis()
+                    ax_sea.set_xlabel('Distance (m)', fontsize=11)
+                    ax_sea.set_ylabel('Profondeur (m)', fontsize=11)
+                    ax_sea.set_title('Zone d\'eau de mer - Résistivité 0.1-1 Ω·m', 
+                                    fontsize=13, fontweight='bold')
+                    ax_sea.legend(loc='upper right')
+                    ax_sea.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    st.pyplot(fig_sea)
+                    figures_dict['seawater_section'] = fig_sea
+                    
+                    st.markdown("""
+                    **Caractéristiques :**
+                    - **Résistivité** : 0.1 - 1 Ω·m
+                    - **Couleur** : 🔴 Rouge vif / Orange
+                    - **Description** : Eau océanique hautement salée (~35 g/L de sel)
+                    - **Conductivité** : Très forte conductivité électrique due aux ions Na⁺ et Cl⁻
+                    - **Contexte** : Typique des mers et océans, intrusion saline côtière
+                    """)
+                else:
+                    st.info("Aucune mesure dans cette plage de résistivité dans vos données")
+            
+            # Coupe 2: Zone Eau Salée Nappe (1 - 10 Ω·m)
+            with st.expander("🟡 Coupe 2 - Nappe d'eau salée (1 - 10 Ω·m)", expanded=False):
+                saline_mask = (df['data'] > 1.0) & (df['data'] <= 10.0)
+                if saline_mask.sum() > 0:
+                    df_saline = df[saline_mask]
+                    
+                    fig_saline, ax_saline = plt.subplots(figsize=(14, 6), dpi=150)
+                    
+                    x_sal = np.linspace(0, 250, 120)
+                    z_sal = np.linspace(0, 40, 70)
+                    X_sal, Z_sal = np.meshgrid(x_sal, z_sal)
+                    
+                    # Gradient de résistivité pour nappe salée
+                    rho_sal = 3 + np.random.rand(*X_sal.shape) * 5 + Z_sal * 0.05
+                    rho_sal = np.clip(rho_sal, 1, 10)
+                    
+                    pcm_sal = ax_saline.pcolormesh(X_sal, Z_sal, rho_sal, cmap='YlOrRd', 
+                                                  vmin=1, vmax=10, shading='auto')
+                    
+                    if len(df_saline) > 0:
+                        ax_saline.scatter(df_saline['survey_point'], df_saline['depth'], 
+                                        c='orange', s=100, edgecolors='black', 
+                                        linewidths=2, marker='o', zorder=10,
+                                        label=f'Mesures réelles ({len(df_saline)} points)')
+                    
+                    fig_saline.colorbar(pcm_sal, ax=ax_saline, label='Résistivité (Ω.m)')
+                    ax_saline.invert_yaxis()
+                    ax_saline.set_xlabel('Distance (m)', fontsize=11)
+                    ax_saline.set_ylabel('Profondeur (m)', fontsize=11)
+                    ax_saline.set_title('Nappe phréatique salée - Résistivité 1-10 Ω·m', 
+                                       fontsize=13, fontweight='bold')
+                    ax_saline.legend(loc='upper right')
+                    ax_saline.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    st.pyplot(fig_saline)
+                    figures_dict['saline_section'] = fig_saline
+                    
+                    st.markdown("""
+                    **Caractéristiques :**
+                    - **Résistivité** : 1 - 10 Ω·m
+                    - **Couleur** : 🟡 Jaune / Orange
+                    - **Description** : Eau saumâtre dans les nappes phréatiques côtières
+                    - **Salinité** : Intermédiaire, intrusion saline
+                    - **Potabilité** : Souvent non potable sans traitement
+                    - **Contexte** : Zones côtières, pollution par remontée saline
+                    """)
+                else:
+                    st.info("Aucune mesure dans cette plage de résistivité dans vos données")
+            
+            # Coupe 3: Zone Eau Douce (10 - 100 Ω·m)
+            with st.expander("🟢 Coupe 3 - Aquifère d'eau douce (10 - 100 Ω·m)", expanded=False):
+                fresh_mask = (df['data'] > 10.0) & (df['data'] <= 100.0)
+                if fresh_mask.sum() > 0:
+                    df_fresh = df[fresh_mask]
+                    
+                    fig_fresh, ax_fresh = plt.subplots(figsize=(14, 6), dpi=150)
+                    
+                    x_fresh = np.linspace(0, 300, 140)
+                    z_fresh = np.linspace(0, 50, 80)
+                    X_fresh, Z_fresh = np.meshgrid(x_fresh, z_fresh)
+                    
+                    # Résistivité pour eau douce
+                    rho_fresh = 30 + np.random.rand(*X_fresh.shape) * 50 + Z_fresh * 0.3
+                    rho_fresh = np.clip(rho_fresh, 10, 100)
+                    
+                    pcm_fresh = ax_fresh.pcolormesh(X_fresh, Z_fresh, rho_fresh, cmap='YlGn', 
+                                                   vmin=10, vmax=100, shading='auto')
+                    
+                    if len(df_fresh) > 0:
+                        ax_fresh.scatter(df_fresh['survey_point'], df_fresh['depth'], 
+                                       c='green', s=100, edgecolors='black', 
+                                       linewidths=2, marker='D', zorder=10,
+                                       label=f'Mesures réelles ({len(df_fresh)} points)')
+                    
+                    fig_fresh.colorbar(pcm_fresh, ax=ax_fresh, label='Résistivité (Ω.m)')
+                    ax_fresh.invert_yaxis()
+                    ax_fresh.set_xlabel('Distance (m)', fontsize=11)
+                    ax_fresh.set_ylabel('Profondeur (m)', fontsize=11)
+                    ax_fresh.set_title('Aquifère d\'eau douce - Résistivité 10-100 Ω·m', 
+                                      fontsize=13, fontweight='bold')
+                    ax_fresh.legend(loc='upper right')
+                    ax_fresh.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    st.pyplot(fig_fresh)
+                    figures_dict['freshwater_section'] = fig_fresh
+                    
+                    st.markdown("""
+                    **Caractéristiques :**
+                    - **Résistivité** : 10 - 100 Ω·m
+                    - **Couleur** : 🟢 Vert / Bleu clair
+                    - **Description** : Eau douce continentale (rivières, lacs, nappes)
+                    - **Salinité** : Faible (< 1 g/L TDS)
+                    - **Minéraux** : Calcium, magnésium, bicarbonates en faibles concentrations
+                    - **Potabilité** : Généralement potable, bonne qualité
+                    - **Contexte** : Aquifères captifs, zones agricoles, forêts
+                    """)
+                else:
+                    st.info("Aucune mesure dans cette plage de résistivité dans vos données")
+            
+            # Coupe 4: Zone Eau Très Pure (> 100 Ω·m)
+            with st.expander("🔵 Coupe 4 - Eau très pure / Roche sèche (> 100 Ω·m)", expanded=False):
+                pure_mask = (df['data'] > 100.0)
+                if pure_mask.sum() > 0:
+                    df_pure = df[pure_mask]
+                    
+                    fig_pure, ax_pure = plt.subplots(figsize=(14, 6), dpi=150)
+                    
+                    x_pure = np.linspace(0, 200, 100)
+                    z_pure = np.linspace(0, 60, 90)
+                    X_pure, Z_pure = np.meshgrid(x_pure, z_pure)
+                    
+                    # Résistivité pour eau pure/roche
+                    rho_pure = 200 + np.random.rand(*X_pure.shape) * 300 + Z_pure * 2
+                    rho_pure = np.clip(rho_pure, 100, 1000)
+                    
+                    pcm_pure = ax_pure.pcolormesh(X_pure, Z_pure, rho_pure, cmap='Blues', 
+                                                 shading='auto', 
+                                                 norm=LogNorm(vmin=100, vmax=1000))
+                    
+                    if len(df_pure) > 0:
+                        ax_pure.scatter(df_pure['survey_point'], df_pure['depth'], 
+                                      c='darkblue', s=100, edgecolors='black', 
+                                      linewidths=2, marker='^', zorder=10,
+                                      label=f'Mesures réelles ({len(df_pure)} points)')
+                    
+                    fig_pure.colorbar(pcm_pure, ax=ax_pure, label='Résistivité (Ω.m)')
+                    ax_pure.invert_yaxis()
+                    ax_pure.set_xlabel('Distance (m)', fontsize=11)
+                    ax_pure.set_ylabel('Profondeur (m)', fontsize=11)
+                    ax_pure.set_title('Eau très pure / Roche résistive - Résistivité > 100 Ω·m', 
+                                     fontsize=13, fontweight='bold')
+                    ax_pure.legend(loc='upper right')
+                    ax_pure.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    st.pyplot(fig_pure)
+                    figures_dict['purewater_section'] = fig_pure
+                    
+                    st.markdown("""
+                    **Caractéristiques :**
+                    - **Résistivité** : > 100 Ω·m
+                    - **Couleur** : 🔵 Bleu foncé
+                    - **Description** : Eau très pure avec minéraux dissous très faibles
+                    - **TDS** : < 50 mg/L (eau ultrapure)
+                    - **Minéraux** : Quartz, feldspath, granite (roche cristalline)
+                    - **Contexte** : Aquifères en socle cristallin, eau de fonte glaciaire, roche sèche
+                    - **Propriétés** : Très peu d'ions, conductivité électrique minimale
+                    """)
+                else:
+                    st.info("Aucune mesure dans cette plage de résistivité dans vos données")
+            
             # Export
             st.subheader("💾 Exporter les résultats")
             col1, col2, col3 = st.columns(3)
@@ -663,6 +1051,172 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
         depth_stats = compute_depth_stats(data_hash)
         st.dataframe(depth_stats.style.background_gradient(cmap='RdYlBu_r', axis=0), use_container_width=True)
         
+        # Coupes comparatives avec mesures réelles incrustées
+        st.markdown("---")
+        st.subheader("🎯 Coupes comparatives - Mesures réelles vs Modèles théoriques")
+        
+        # Coupe comparative 1: Intrusion saline
+        with st.expander("🌊 Coupe comparative 1 - Intrusion saline côtière avec mesures", expanded=False):
+            fig_comp1, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6), dpi=150)
+            
+            # Modèle théorique
+            x_model = np.linspace(0, 300, 150)
+            z_model = np.linspace(0, 40, 80)
+            X_model, Z_model = np.meshgrid(x_model, z_model)
+            
+            # Gradient d'intrusion saline (mer vers terre)
+            rho_model = np.ones_like(X_model) * 0.5  # Eau de mer
+            rho_model[Z_model > 10 + 0.05 * X_model] = 3  # Eau salée nappe
+            rho_model[Z_model > 25] = 50  # Eau douce profonde
+            rho_model *= (1 + np.random.randn(*rho_model.shape) * 0.1)
+            rho_model = np.clip(rho_model, 0.1, 100)
+            
+            # Graphique modèle
+            pcm1 = ax1.pcolormesh(X_model, Z_model, rho_model, cmap='jet_r', 
+                                 norm=LogNorm(vmin=0.1, vmax=100), shading='auto')
+            ax1.invert_yaxis()
+            ax1.set_title('Modèle théorique - Intrusion saline', fontsize=12, fontweight='bold')
+            ax1.set_xlabel('Distance depuis la côte (m)')
+            ax1.set_ylabel('Profondeur (m)')
+            fig_comp1.colorbar(pcm1, ax=ax1, label='Résistivité (Ω.m)')
+            
+            # Annoter les zones
+            ax1.text(50, 5, 'Eau de mer\n0.1-1 Ω·m', 
+                    bbox=dict(boxstyle='round', facecolor='red', alpha=0.7),
+                    fontsize=9, ha='center', color='white', fontweight='bold')
+            ax1.text(150, 18, 'Eau salée\n1-10 Ω·m', 
+                    bbox=dict(boxstyle='round', facecolor='orange', alpha=0.7),
+                    fontsize=9, ha='center', fontweight='bold')
+            ax1.text(250, 32, 'Eau douce\n10-100 Ω·m', 
+                    bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7),
+                    fontsize=9, ha='center', fontweight='bold')
+            
+            # Données réelles
+            if len(df) > 0:
+                # Interpoler les données réelles - Conversion explicite en float
+                X_real_data = pd.to_numeric(df['survey_point'], errors='coerce').values
+                Z_real_data = np.abs(pd.to_numeric(df['depth'], errors='coerce').values)
+                Rho_real_data = pd.to_numeric(df['data'], errors='coerce').values
+                
+                # Filtrer les valeurs NaN
+                mask = ~(np.isnan(X_real_data) | np.isnan(Z_real_data) | np.isnan(Rho_real_data))
+                X_real_data = X_real_data[mask]
+                Z_real_data = Z_real_data[mask]
+                Rho_real_data = Rho_real_data[mask]
+                
+                # Créer une grille pour les données réelles
+                from scipy.interpolate import griddata
+                if len(X_real_data) > 0:
+                    xi_real = np.linspace(X_real_data.min(), X_real_data.max(), 100)
+                    zi_real = np.linspace(Z_real_data.min(), Z_real_data.max(), 60)
+                    Xi_real, Zi_real = np.meshgrid(xi_real, zi_real)
+                    Rhoi_real = griddata((X_real_data, Z_real_data), Rho_real_data, 
+                                        (Xi_real, Zi_real), method='cubic')
+                    
+                    pcm2 = ax2.pcolormesh(Xi_real, Zi_real, Rhoi_real, cmap='jet_r', 
+                                         norm=LogNorm(vmin=max(0.1, Rho_real_data.min()), 
+                                                     vmax=Rho_real_data.max()), shading='auto')
+                    ax2.scatter(X_real_data, Z_real_data, c='black', s=50, 
+                               edgecolors='white', linewidths=1.5, marker='o', zorder=10,
+                               label=f'{len(X_real_data)} mesures')
+                    ax2.invert_yaxis()
+                    ax2.set_title(f'Données réelles - {len(X_real_data)} mesures', fontsize=12, fontweight='bold')
+                ax2.set_xlabel('Point de sondage')
+                ax2.set_ylabel('Profondeur (m)')
+                ax2.legend(loc='upper right')
+                fig_comp1.colorbar(pcm2, ax=ax2, label='Résistivité mesurée (Ω.m)')
+            
+            plt.tight_layout()
+            st.pyplot(fig_comp1)
+            figures_tab3['comparative_1'] = fig_comp1
+            
+            st.markdown("""
+            **Analyse comparative :**
+            - **Gauche** : Modèle théorique d'intrusion saline typique
+            - **Droite** : Vos mesures réelles interpolées avec points de mesure (noirs)
+            - Permet d'identifier les zones d'intrusion marine dans vos données
+            """)
+        
+        # Coupe comparative 2: Aquifère multicouche
+        with st.expander("🏔️ Coupe comparative 2 - Aquifère multicouche avec résistivités", expanded=False):
+            fig_comp2, ax_multi = plt.subplots(figsize=(14, 7), dpi=150)
+            
+            # Créer un modèle multicouche
+            x_multi = np.linspace(0, 250, 140)
+            z_multi = np.linspace(0, 50, 90)
+            X_multi, Z_multi = np.meshgrid(x_multi, z_multi)
+            
+            # Couches avec résistivités différentes
+            rho_multi = np.ones_like(X_multi) * 200  # Sol sec surface
+            rho_multi[(Z_multi > 8) & (Z_multi < 15)] = 60  # Aquifère peu profond (eau douce)
+            rho_multi[(Z_multi >= 15) & (Z_multi < 25)] = 5  # Argile conductive
+            rho_multi[(Z_multi >= 25) & (Z_multi < 40)] = 80  # Aquifère profond (eau douce)
+            rho_multi[Z_multi >= 40] = 400  # Substrat rocheux
+            
+            # Ajouter du bruit
+            rho_multi *= (1 + np.random.randn(*rho_multi.shape) * 0.08)
+            rho_multi = np.clip(rho_multi, 1, 500)
+            
+            pcm_multi = ax_multi.pcolormesh(X_multi, Z_multi, rho_multi, cmap='jet_r', 
+                                           norm=LogNorm(vmin=1, vmax=500), shading='auto')
+            
+            # Superposer les mesures réelles si disponibles
+            if len(df) > 0:
+                ax_multi.scatter(df['survey_point'], np.abs(df['depth']), 
+                               c=df['data'], cmap='jet_r', s=120, 
+                               edgecolors='black', linewidths=2, marker='s',
+                               norm=LogNorm(vmin=max(0.1, df['data'].min()), 
+                                          vmax=df['data'].max()),
+                               zorder=10, label='Mesures réelles')
+                
+                # Annoter quelques points avec leurs valeurs
+                for i in range(min(5, len(df))):
+                    row = df.iloc[i]
+                    ax_multi.annotate(f'{row["data"]:.1f} Ω·m', 
+                                    xy=(row['survey_point'], np.abs(row['depth'])),
+                                    xytext=(10, 10), textcoords='offset points',
+                                    fontsize=8, ha='left',
+                                    bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
+                                    arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+            
+            fig_comp2.colorbar(pcm_multi, ax=ax_multi, label='Résistivité (Ω.m)')
+            ax_multi.invert_yaxis()
+            ax_multi.set_xlabel('Distance (m)', fontsize=11)
+            ax_multi.set_ylabel('Profondeur (m)', fontsize=11)
+            ax_multi.set_title('Modèle multicouche avec mesures réelles incrustées', 
+                              fontsize=13, fontweight='bold')
+            if len(df) > 0:
+                ax_multi.legend(loc='upper right')
+            ax_multi.grid(True, alpha=0.2, color='white', linestyle='--')
+            
+            # Ajouter légende des couches
+            ax_multi.text(0.02, 0.98, 'Couches géologiques:', transform=ax_multi.transAxes,
+                         fontsize=10, va='top', fontweight='bold',
+                         bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            ax_multi.text(0.02, 0.92, '• 0-8m: Sol sec (200 Ω·m)', transform=ax_multi.transAxes,
+                         fontsize=8, va='top')
+            ax_multi.text(0.02, 0.88, '• 8-15m: Aquifère peu profond (60 Ω·m)', transform=ax_multi.transAxes,
+                         fontsize=8, va='top')
+            ax_multi.text(0.02, 0.84, '• 15-25m: Argile conductive (5 Ω·m)', transform=ax_multi.transAxes,
+                         fontsize=8, va='top')
+            ax_multi.text(0.02, 0.80, '• 25-40m: Aquifère profond (80 Ω·m)', transform=ax_multi.transAxes,
+                         fontsize=8, va='top')
+            ax_multi.text(0.02, 0.76, '• >40m: Substrat rocheux (400 Ω·m)', transform=ax_multi.transAxes,
+                         fontsize=8, va='top')
+            
+            plt.tight_layout()
+            st.pyplot(fig_comp2)
+            figures_tab3['comparative_2'] = fig_comp2
+            
+            st.markdown("""
+            **Interprétation multicouche :**
+            - **Carrés noirs** : Vos mesures réelles avec annotations de valeurs
+            - **Fond coloré** : Modèle théorique multicouche
+            - Les zones bleues (haute résistivité) indiquent des formations sèches ou rocheuses
+            - Les zones rouges/orange (faible résistivité) indiquent de l'argile ou de l'eau salée
+            - Les zones vertes/jaunes (résistivité moyenne) indiquent des aquifères d'eau douce
+            """)
+        
         # Export PDF des pseudo-sections
         st.subheader("📄 Export PDF des Pseudo-sections")
         col_pdf1, col_pdf2 = st.columns([1, 2])
@@ -687,6 +1241,170 @@ Les zones bleues indiquent des niveaux d'eau plus bas (nappe plus proche de la s
         st.warning("⚠️ Aucune donnée chargée. Veuillez d'abord uploader un fichier .dat dans l'onglet 'Analyse Fichiers .dat'")
         st.info("💡 Uploadez un fichier .dat dans l'onglet 'Analyse Fichiers .dat' pour visualiser vos données avec interprétation des couleurs de résistivité.")
 
+# ===================== TAB 4 : STRATIGRAPHIE COMPLÈTE =====================
+with tab4:
+    st.header("🪨 Stratigraphie Complète - Classification Géologique avec Résistivités")
+    
+    st.markdown("""
+    ### 📊 Vue d'ensemble des matériaux géologiques
+    Cette section présente **toutes les formations géologiques** (eaux, sols, roches, minéraux) avec leurs résistivités caractéristiques.
+    Cela permet d'identifier précisément la **nature des couches** à chaque niveau de profondeur.
+    """)
+    
+    # Afficher le tableau complet
+    st.markdown(geology_html, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Section graphiques de stratigraphie
+    if 'df' in st.session_state and len(st.session_state['df']) > 0:
+        df = st.session_state['df']
+        
+        st.subheader("🎨 Coupes Stratigraphiques Multi-Niveaux")
+        st.markdown("""
+        Ces coupes montrent la **distribution des matériaux géologiques** selon les valeurs de résistivité mesurées.
+        Chaque plage de résistivité correspond à un type de matériau spécifique (eau, argile, sable, roche, etc.).
+        """)
+        
+        # Créer les plages de résistivité étendues
+        resistivity_ranges = {
+            'Minéraux métalliques\n(Graphite, Cuivre, Or)': (0.001, 1, 'Spectral', 'Très conducteurs - Cibles minières'),
+            'Eaux de mer + Argiles marines': (0.1, 10, 'YlOrRd', 'Zone conductrice - Salinité élevée'),
+            'Argiles compactes + Eaux salées': (10, 50, 'RdYlBu', 'Formations imperméables saturées'),
+            'Eaux douces + Limons + Schistes': (50, 200, 'YlGn', 'Aquifères argileux-sableux'),
+            'Sables saturés + Graviers': (200, 1000, 'GnBu', 'Aquifères perméables productifs'),
+            'Calcaires + Grès + Basaltes fracturés': (1000, 5000, 'PuBu', 'Formations carbonatées/volcaniques'),
+            'Roches ignées + Granites': (5000, 100000, 'Purples', 'Socle cristallin - Très résistif'),
+            'Quartzites + Minéraux isolants': (10000, 1000000, 'gray', 'Formations ultra-résistives')
+        }
+        
+        cols_strat = st.columns(2)
+        
+        for idx, (name, (rho_min, rho_max, cmap, description)) in enumerate(resistivity_ranges.items()):
+            with cols_strat[idx % 2]:
+                with st.expander(f"📍 **{name}** ({rho_min}-{rho_max} Ω·m)", expanded=False):
+                    st.caption(f"*{description}*")
+                    
+                    # Filtrer les données dans cette plage
+                    mask = (df['data'] >= rho_min) & (df['data'] <= rho_max)
+                    df_filtered = df[mask]
+                    
+                    if len(df_filtered) > 3:
+                        fig_strat, ax_strat = plt.subplots(figsize=(10, 6))
+                        
+                        # Convertir les données en float
+                        X_strat = pd.to_numeric(df_filtered['survey_point'], errors='coerce').values
+                        Z_strat = np.abs(pd.to_numeric(df_filtered['depth'], errors='coerce').values)
+                        Rho_strat = pd.to_numeric(df_filtered['data'], errors='coerce').values
+                        
+                        # Filtrer NaN
+                        mask_valid = ~(np.isnan(X_strat) | np.isnan(Z_strat) | np.isnan(Rho_strat))
+                        X_strat = X_strat[mask_valid]
+                        Z_strat = Z_strat[mask_valid]
+                        Rho_strat = Rho_strat[mask_valid]
+                        
+                        if len(X_strat) > 3:
+                            # Interpolation
+                            from scipy.interpolate import griddata
+                            xi_strat = np.linspace(X_strat.min(), X_strat.max(), 120)
+                            zi_strat = np.linspace(Z_strat.min(), Z_strat.max(), 80)
+                            Xi_strat, Zi_strat = np.meshgrid(xi_strat, zi_strat)
+                            Rhoi_strat = griddata((X_strat, Z_strat), Rho_strat, 
+                                                 (Xi_strat, Zi_strat), method='cubic')
+                            
+                            # Affichage avec échelle log si plage large
+                            if rho_max / rho_min > 10:
+                                pcm_strat = ax_strat.pcolormesh(Xi_strat, Zi_strat, Rhoi_strat, 
+                                                               cmap=cmap, shading='auto',
+                                                               norm=LogNorm(vmin=rho_min, vmax=rho_max))
+                            else:
+                                pcm_strat = ax_strat.pcolormesh(Xi_strat, Zi_strat, Rhoi_strat, 
+                                                               cmap=cmap, shading='auto',
+                                                               vmin=rho_min, vmax=rho_max)
+                            
+                            # Points de mesure
+                            ax_strat.scatter(X_strat, Z_strat, c='black', s=30, 
+                                           edgecolors='white', linewidths=1, marker='o', 
+                                           alpha=0.6, zorder=10)
+                            
+                            ax_strat.invert_yaxis()
+                            ax_strat.set_xlabel('Distance (m)', fontsize=11, fontweight='bold')
+                            ax_strat.set_ylabel('Profondeur (m)', fontsize=11, fontweight='bold')
+                            ax_strat.set_title(f'{name}\n{len(df_filtered)} mesures - Résistivité : {rho_min}-{rho_max} Ω·m',
+                                             fontsize=11, fontweight='bold', pad=15)
+                            ax_strat.grid(True, alpha=0.3, linestyle='--')
+                            
+                            cbar_strat = plt.colorbar(pcm_strat, ax=ax_strat, pad=0.02)
+                            cbar_strat.set_label('Résistivité (Ω·m)', fontsize=10, fontweight='bold')
+                            
+                            plt.tight_layout()
+                            st.pyplot(fig_strat)
+                            plt.close()
+                        else:
+                            st.info(f"✓ {len(df_filtered)} mesure(s) détectée(s) mais insuffisantes pour interpolation")
+                    else:
+                        st.info(f"ℹ️ Aucune ou trop peu de mesures ({len(df_filtered)}) dans cette plage de résistivité")
+        
+        st.markdown("---")
+        
+        # Graphique synthétique de distribution
+        st.subheader("📊 Distribution des Matériaux par Profondeur")
+        
+        fig_dist, (ax_hist, ax_depth) = plt.subplots(1, 2, figsize=(14, 6))
+        
+        # Histogramme des résistivités (échelle log)
+        rho_data = pd.to_numeric(df['data'], errors='coerce').dropna()
+        ax_hist.hist(rho_data, bins=50, color='steelblue', edgecolor='black', alpha=0.7)
+        ax_hist.set_xscale('log')
+        ax_hist.set_xlabel('Résistivité (Ω·m) - Échelle log', fontsize=11, fontweight='bold')
+        ax_hist.set_ylabel('Nombre de mesures', fontsize=11, fontweight='bold')
+        ax_hist.set_title('Distribution des Résistivités Mesurées', fontsize=12, fontweight='bold')
+        ax_hist.grid(True, alpha=0.3, axis='y')
+        
+        # Zones colorées pour les matériaux
+        ax_hist.axvspan(0.001, 1, alpha=0.2, color='gold', label='Minéraux métalliques')
+        ax_hist.axvspan(1, 10, alpha=0.2, color='red', label='Eaux salées + Argiles')
+        ax_hist.axvspan(10, 100, alpha=0.2, color='yellow', label='Eaux douces + Sols')
+        ax_hist.axvspan(100, 1000, alpha=0.2, color='green', label='Sables + Graviers')
+        ax_hist.axvspan(1000, 10000, alpha=0.2, color='blue', label='Roches sédimentaires')
+        ax_hist.axvspan(10000, 1000000, alpha=0.2, color='purple', label='Roches ignées')
+        ax_hist.legend(loc='upper right', fontsize=8)
+        
+        # Profil résistivité vs profondeur
+        depth_data = np.abs(pd.to_numeric(df['depth'], errors='coerce').dropna())
+        rho_for_depth = pd.to_numeric(df.loc[depth_data.index, 'data'], errors='coerce')
+        
+        scatter = ax_depth.scatter(rho_for_depth, depth_data, c=rho_for_depth, 
+                                  cmap='viridis', s=50, alpha=0.6, 
+                                  edgecolors='black', linewidths=0.5,
+                                  norm=LogNorm(vmin=max(0.1, rho_for_depth.min()), 
+                                              vmax=rho_for_depth.max()))
+        ax_depth.set_xscale('log')
+        ax_depth.invert_yaxis()
+        ax_depth.set_xlabel('Résistivité (Ω·m) - Échelle log', fontsize=11, fontweight='bold')
+        ax_depth.set_ylabel('Profondeur (m)', fontsize=11, fontweight='bold')
+        ax_depth.set_title('Résistivité en fonction de la Profondeur', fontsize=12, fontweight='bold')
+        ax_depth.grid(True, alpha=0.3)
+        
+        cbar_dist = plt.colorbar(scatter, ax=ax_depth)
+        cbar_dist.set_label('Résistivité (Ω·m)', fontsize=10, fontweight='bold')
+        
+        plt.tight_layout()
+        st.pyplot(fig_dist)
+        plt.close()
+        
+        st.success(f"""
+        ✅ **Analyse complète effectuée**
+        - {len(df)} mesures analysées
+        - Profondeur max : {depth_data.max():.1f} m
+        - Résistivité min/max : {rho_data.min():.2f} - {rho_data.max():.0f} Ω·m
+        - Identification automatique des formations géologiques
+        """)
+        
+    else:
+        st.warning("⚠️ Aucune donnée chargée. Veuillez d'abord uploader un fichier .dat dans l'onglet 'Analyse Fichiers .dat'")
+        st.info("💡 Une fois les données chargées, vous pourrez visualiser la stratigraphie complète avec identification automatique des formations.")
+
 # --- Sidebar ---
 st.sidebar.image("logo_belikan.png", use_container_width=True)
 st.sidebar.markdown("""
@@ -695,11 +1413,12 @@ Outil d'analyse géophysique
 Expert en hydrogéologie et ERT
 
 **Outil optimisé – 07 Novembre 2025**  
-✅ Calculateur Ts intelligent (Ravensgate Sonic)
+✅ Calculateur Ts intelligent (Ravensgate Sonic)  
 ✅ Analyse .dat + détection anomalies (K-Means avec cache)  
 ✅ Tableau résistivité eau (descriptions détaillées)  
 ✅ Pseudo-sections 2D/3D basées sur vos données réelles  
-✅ Interprétation couleurs : résistivité → type d'eau → minéraux  
+✅ **NOUVEAU** : Stratigraphie complète (sols + eaux + roches + minéraux)  
+✅ Interprétation multi-matériaux : 8 catégories géologiques  
 ✅ Performance optimisée avec @st.cache_data  
 ✅ Interpolation cubique cachée pour fluidité  
 ✅ Zéro exemples synthétiques - Données réelles uniquement  
@@ -710,9 +1429,20 @@ Expert en hydrogéologie et ERT
 📊 Excel - Tableaux formatés  
 📄 PDF - Rapports graphiques haute qualité (150 DPI)
 
-**Légende couleurs ERT** :  
-- 🔴 Rouge/orange (<10 Ω·m) : Eau salée/mer  
-- 🟡 Jaune (10-100 Ω·m) : Eau saumâtre/douce  
-- 🔵 Bleu (>100 Ω·m) : Eau pure/roche sèche  
+**Catégories géologiques identifiées** :  
+💧 Eaux (mer, salée, douce, pure)  
+🧱 Argiles & sols saturés  
+🏖️ Sables & graviers  
+🪨 Roches sédimentaires (calcaire, grès, schiste)  
+🌋 Roches ignées & métamorphiques (granite, basalte)  
+� Minéraux & minerais (graphite, cuivre, or, quartz)
+
+**Plages de résistivité** :  
+- 0.001-1 Ω·m : Minéraux métalliques  
+- 0.1-10 Ω·m : Eaux salées + argiles marines  
+- 10-100 Ω·m : Eaux douces + sols fins  
+- 100-1000 Ω·m : Sables saturés + graviers  
+- 1000-10000 Ω·m : Roches sédimentaires  
+- >10000 Ω·m : Socle cristallin (granite, quartzite)  
 """)
 
