@@ -62,15 +62,8 @@ import time
 import shutil
 # AI Code Agent pour exécution autonome de code
 from ai_code_agent import AICodeAgent
-from graph_generation_agent import GraphGenerationAgent
-from graph_generation_agent import GraphGenerationAgent  # Agent de génération de graphiques
 from visualization_tools import VisualizationEngine, export_visualization_package, create_multi_page_pdf
 from auto_visualizer import AutoVisualizer
-from intelligent_ert_analyzer import IntelligentERTAnalyzer, kibali_analyze_ert  # Module d'analyse intelligente pour Kibali
-# from intelligent_dat_analyzer import IntelligentDATAnalyzer, analyze_dat_file  # Analyseur de structure de fichiers .DAT - RETIRÉ car calculs incorrects
-from advanced_visualization_engine import AdvancedVisualizationEngine, create_advanced_visualization  # Moteur ultra-puissant PyGIMLI+OpenCV+Matplotlib
-# from survey_depth_parser import SurveyDepthDataParser, parse_survey_depth_file  # Parseur spécialisé survey-point/depth/data - RETIRÉ car calculs incorrects
-from multi_freq_ert_parser import MultiFreqERTParser, multi_freq_parser  # Parseur multi-fréquences pour fichiers .dat complémentaires
 # Voice Agent pour transcription et synthèse vocale (import optionnel)
 try:
     from voice_agent import VoiceAgent, StreamingVoiceAgent
@@ -383,11 +376,10 @@ CONTEXTE UTILISATEUR: {user_message}
             outputs = self.model.generate(
                 inputs,
                 attention_mask=attention_mask,
-                max_new_tokens=3000,  # 3000 tokens pour réponses TRÈS détaillées
+                max_new_tokens=2000, # Plus de tokens pour analyses détaillées
                 temperature=0.6,
                 do_sample=True,
                 top_p=0.9,
-                repetition_penalty=1.05,  # Éviter répétitions
                 pad_token_id=self.tokenizer.eos_token_id
             )
        
@@ -4319,7 +4311,7 @@ Si des minéraux ont été détectés, mentionne les plus intéressants pour l'e
                 outputs = model.generate(
                     inputs['input_ids'],
                     attention_mask=attention_mask,
-                    max_new_tokens=3000,  # AUGMENTÉ pour synthèses COMPLÈTES
+                    max_new_tokens=1000,
                     temperature=0.7,
                     do_sample=True,
                     top_p=0.9,
@@ -4731,7 +4723,7 @@ INSTRUCTION: En tant qu'expert mondial en cybersécurité, analyse de fichiers b
                 outputs = model.generate(
                     inputs,
                     attention_mask=attention_mask,
-                    max_new_tokens=3000,  # AUGMENTÉ pour analyses COMPLÈTES
+                    max_new_tokens=2500,
                     temperature=0.6,
                     do_sample=True,
                     top_p=0.9,
@@ -4744,7 +4736,7 @@ INSTRUCTION: En tant qu'expert mondial en cybersécurité, analyse de fichiers b
                 outputs = model.generate(
                     inputs,
                     attention_mask=attention_mask,
-                    max_new_tokens=3000,  # AUGMENTÉ pour analyses COMPLÈTES
+                    max_new_tokens=2500,
                     temperature=0.6,
                     do_sample=True,
                     top_p=0.9,
@@ -4915,175 +4907,7 @@ if uploaded_pdfs and st.button("Indexer les PDFs dans la base vectorielle"):
                 st.info(f"💾 Base sauvegardée dans {VECTORDB_PATH}")
             except Exception as e:
                 st.warning(f"⚠️ Impossible de sauvegarder: {e}")
-# ═══════════════════════════════════════════════════════════════
-# SECTION MULTI-FICHIERS ERT MULTI-FRÉQUENCES
-# ═══════════════════════════════════════════════════════════════
-st.markdown("---")
-st.subheader("📊 Parseur Multi-Fréquences ERT - Fichiers Complémentaires")
-st.info("""
-🎯 **Uploadez plusieurs fichiers .dat complémentaires** avec multi-fréquences (MHz)
-
-Format attendu :
-- En-tête : `..., 1000 MHz, 500 MHz, 250 MHz, ...`
-- Données : `project, survey_point, depth, res1, res2, res3, ...`
-
-✅ Fusion automatique des fichiers
-✅ Coordonnées spatiales correctes (X, Y, Z)
-✅ Visualisations 2D/3D par fréquence
-""")
-
-# Upload multiple files
-uploaded_ert_files = st.file_uploader(
-    "📤 Chargez vos fichiers .dat ERT (plusieurs fichiers possibles)",
-    type=['dat', 'txt'],
-    accept_multiple_files=True,
-    key="multi_freq_uploader"
-)
-
-if uploaded_ert_files and len(uploaded_ert_files) > 0:
-    with st.spinner(f"📊 Parsing de {len(uploaded_ert_files)} fichier(s)..."):
-        # Sauvegarder temporairement les fichiers
-        temp_paths = []
-        for uploaded_file in uploaded_ert_files:
-            temp_path = f"/tmp/ert_{uploaded_file.name}"
-            with open(temp_path, 'wb') as f:
-                f.write(uploaded_file.getbuffer())
-            temp_paths.append(temp_path)
-        
-        # Parser avec le nouveau parseur
-        parser = MultiFreqERTParser()
-        df_ert = parser.parse_multiple_files(temp_paths)
-        
-        if not df_ert.empty:
-            st.success(f"✅ {len(df_ert)} mesures chargées depuis {len(uploaded_ert_files)} fichier(s) !")
-            
-            # Afficher métadonnées
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("📁 Fichiers", parser.metadata['num_files'])
-                st.metric("📡 Fréquences", parser.metadata['num_frequencies'])
-            with col2:
-                st.metric("📍 Survey Points", parser.metadata['num_survey_points'])
-                st.metric("📏 Profondeurs", parser.metadata['num_depths'])
-            with col3:
-                st.metric("🔬 Projets", parser.metadata['num_projects'])
-                st.metric("📊 Mesures", parser.metadata['total_measurements'])
-            with col4:
-                st.metric("⬇️ Prof. min", f"{parser.metadata['depth_range'][0]:.1f} m")
-                st.metric("⬇️ Prof. max", f"{parser.metadata['depth_range'][1]:.1f} m")
-            
-            # Rapport statistique
-            with st.expander("📋 Rapport Statistique Complet", expanded=False):
-                report = parser.generate_statistics_report()
-                st.text(report)
-            
-            # Afficher données brutes
-            with st.expander("🔢 Données Brutes Fusionnées", expanded=False):
-                st.dataframe(df_ert.head(100), use_container_width=True)
-            
-            # COORDONNÉES CORRECTES
-            st.markdown("### 🎯 Coordonnées Spatiales Correctes (X, Y, Z)")
-            coords_df = parser.get_coordinates_corrected()
-            
-            with st.expander("📐 Tableau des Coordonnées", expanded=False):
-                st.dataframe(coords_df.head(50), use_container_width=True)
-                
-                # Export CSV
-                csv_coords = coords_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Télécharger Coordonnées (CSV)",
-                    data=csv_coords,
-                    file_name="ert_coordinates.csv",
-                    mime="text/csv"
-                )
-            
-            # VISUALISATIONS PAR FRÉQUENCE
-            st.markdown("### 📊 Visualisations Multi-Fréquences")
-            
-            freq_tabs = st.tabs([f"📡 {freq} MHz" for freq in parser.frequencies] + ["🔄 Comparaison", "🌐 3D"])
-            
-            # Onglet pour chaque fréquence
-            for i, freq in enumerate(parser.frequencies):
-                with freq_tabs[i]:
-                    st.markdown(f"#### Coupe 2D - {freq} MHz")
-                    
-                    fig_2d = parser.create_2d_section_by_frequency(freq)
-                    if fig_2d:
-                        st.plotly_chart(fig_2d, use_container_width=True)
-                        
-                        # Stats par fréquence
-                        freq_data = df_ert[df_ert['frequency_MHz'] == freq]
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Mesures", len(freq_data))
-                        with col2:
-                            st.metric("Rés. moy.", f"{freq_data['resistivity'].mean():.2f} Ω·m")
-                        with col3:
-                            st.metric("Écart-type", f"{freq_data['resistivity'].std():.2f}")
-            
-            # Onglet comparaison
-            with freq_tabs[-2]:
-                st.markdown("#### Comparaison Multi-Fréquences")
-                fig_comp = parser.create_frequency_comparison()
-                if fig_comp:
-                    st.plotly_chart(fig_comp, use_container_width=True)
-                    
-                    st.info("""
-                    💡 **Interprétation des courbes** :
-                    - Les différentes fréquences pénètrent à différentes profondeurs
-                    - Les écarts entre courbes révèlent l'hétérogénéité du sous-sol
-                    - Les croisements indiquent des changements de matériaux
-                    """)
-            
-            # Onglet 3D
-            with freq_tabs[-1]:
-                st.markdown("#### Volume 3D Interactif")
-                fig_3d = parser.create_3d_volume()
-                if fig_3d:
-                    st.plotly_chart(fig_3d, use_container_width=True)
-                    
-                    st.success("✅ Cliquez-glissez pour rotation, molette pour zoom")
-            
-            # EXPORT EXCEL
-            st.markdown("### 📥 Export des Données")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Export CSV complet
-                csv_full = df_ert.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📊 Télécharger Données Complètes (CSV)",
-                    data=csv_full,
-                    file_name="ert_multi_freq_complet.csv",
-                    mime="text/csv"
-                )
-            
-            with col2:
-                # Export Excel
-                if st.button("📦 Générer Excel Multi-Feuilles", type="primary"):
-                    excel_path = "/tmp/ert_multi_freq_export.xlsx"
-                    msg = parser.export_to_excel(excel_path)
-                    st.success(msg)
-                    
-                    if os.path.exists(excel_path):
-                        with open(excel_path, 'rb') as f:
-                            st.download_button(
-                                label="📥 Télécharger Excel",
-                                data=f.read(),
-                                file_name="ert_multi_freq_export.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
-            
-            # Sauvegarder dans session state pour utilisation par Kibali
-            st.session_state['multi_freq_data'] = df_ert
-            st.session_state['multi_freq_coords'] = coords_df
-            st.session_state['multi_freq_parser'] = parser
-        
-        else:
-            st.error("❌ Aucune donnée extraite. Vérifiez le format des fichiers.")
-
 # Section for binary file upload
-st.markdown("---")
 uploaded_file = st.file_uploader("Choisir un fichier binaire", type=["bin","dat","raw","bin","safetensors","pt","ckpt"])
 if uploaded_file:
     file_bytes = uploaded_file.read()
@@ -5095,321 +4919,10 @@ if uploaded_file:
     st.subheader("🔢 Extraction des nombres")
     numbers = extract_numbers(file_bytes)
     if numbers:
-        # SAUVEGARDER LES DONNÉES POUR VISUALISATION
-        st.session_state.current_file_data = numbers
-        st.session_state.current_filename = uploaded_file.name
-        
         df = pd.DataFrame(numbers, columns=["Value"])
         st.dataframe(df)
         st.subheader("📊 Statistiques rapides")
         st.write(df.describe())
-        
-        # 🧠 ANALYSE INTELLIGENTE KIBALI POUR ERT
-        if uploaded_file.name.lower().endswith('.dat'):
-            st.markdown("---")
-            
-            # 🔍 ANALYSE AUTOMATIQUE DE LA STRUCTURE DU FICHIER
-            st.subheader("🔍 Analyse Automatique de Structure - Fichier .DAT")
-            
-            with st.expander("📋 Rapport de Structure Détecté", expanded=True):
-                try:
-                    # Analyser structure du fichier avec MultiFreqERTParser
-                    from multi_freq_ert_parser import MultiFreqERTParser
-                    file_path_str = str(file_path)
-                    
-                    parser = MultiFreqERTParser()
-                    
-                    # Tester si c'est un fichier multi-fréquences
-                    if parser.detect_format(file_path_str) is not None:
-                        st.info("🔬 **Fichier ERT Multi-Fréquences détecté !**")
-                        
-                        # Parser le fichier
-                        df = parser.parse_file(file_path_str)
-                        
-                        if not df.empty:
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                st.metric("Type de fichier", "ERT Multi-Freq")
-                                st.metric("Mesures", len(df))
-                            
-                            with col2:
-                                st.metric("Fréquences", len(parser.frequencies) if parser.frequencies else "N/A")
-                                st.metric("Survey Points", len(parser.survey_points) if parser.survey_points else "N/A")
-                            
-                            with col3:
-                                freq_range = f"{min(parser.frequencies):.0f}-{max(parser.frequencies):.0f}" if parser.frequencies else "N/A"
-                                st.metric("Plage MHz", freq_range)
-                                depth_range = f"{parser.metadata['depth_range'][0]:.1f} à {parser.metadata['depth_range'][1]:.1f}m" if 'depth_range' in parser.metadata else "N/A"
-                                st.metric("Profondeur", depth_range)
-                            
-                            # Structure
-                            st.markdown("#### 📊 Structure des Données")
-                            st.dataframe(df[['project', 'survey_point', 'depth', 'frequency_MHz', 'resistivity']].head(10))
-                            
-                            # Sauvegarder en session
-                            st.session_state['multi_freq_data'] = df
-                            st.session_state['multi_freq_parser'] = parser
-                        else:
-                            st.warning("⚠️ Fichier détecté mais aucune donnée parsée")
-                    else:
-                        # Format non reconnu - affichage basique
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.metric("Type de fichier", "DAT (format inconnu)")
-                            st.metric("Confiance", "N/A")
-                        
-                        with col2:
-                            st.metric("Encodage", "Auto-détecté")
-                            st.metric("Stations", "N/A")
-                        
-                        with col3:
-                            st.metric("Colonnes", "N/A")
-                            st.metric("Mesures", "N/A")
-                
-                except Exception as e:
-                    st.error(f"❌ Erreur lors de l'analyse de structure: {e}")
-                    import traceback
-                    st.code(traceback.format_exc())
-            
-            # ═══════════════════════════════════════════════════════════════
-            # DÉTECTION FORMAT SURVEY-POINT / DEPTH / DATA
-            # ═══════════════════════════════════════════════════════════════
-            st.markdown("---")
-            
-            try:
-                # survey_parser = SurveyDepthDataParser()
-                # 
-                # if survey_parser.detect_format(file_path_str):
-                    st.success("🎯 **Format Survey-Point / Depth / Data détecté !**")
-                    
-                    with st.expander("📊 ANALYSE PROFIL VERTICAL - Survey Points", expanded=True):
-                        with st.spinner("Analyse du profil survey-point/depth/data..."):
-                            # Charger données
-                            df_survey = survey_parser.load_data(file_path_str)
-                            
-                            # Afficher statistiques
-                            st.markdown("##### 📈 Structure Détectée")
-                            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-                            
-                            with col_s1:
-                                st.metric("📍 Survey Points", survey_parser.structure['num_survey_points'])
-                            with col_s2:
-                                st.metric("📏 Points Total", survey_parser.structure['num_points'])
-                            with col_s3:
-                                depth_range = survey_parser.structure['depth_range']
-                                st.metric("🌊 Profondeur Max", f"{abs(depth_range[1]):.1f} m")
-                            with col_s4:
-                                data_range = survey_parser.structure['data_range']
-                                st.metric("📊 Plage Valeurs", f"{data_range[0]:.3f} - {data_range[1]:.3f}")
-                            
-                            # Rapport statistique
-                            st.markdown("##### 📋 Rapport Statistique Complet")
-                            report = survey_parser.generate_statistics_report()
-                            st.text(report)
-                            
-                            # Bouton télécharger rapport
-                            st.download_button(
-                                "📥 Télécharger Rapport Survey (.txt)",
-                                report,
-                                f"survey_analysis_{uploaded_file.name}.txt",
-                                "text/plain"
-                            )
-                            
-                            # Aperçu données
-                            st.markdown("##### 🔢 Aperçu Données Survey")
-                            st.dataframe(df_survey.head(30), use_container_width=True)
-                            
-                            # VISUALISATIONS AUTOMATIQUES
-                            st.markdown("---")
-                            st.markdown("### 📊 Visualisations Automatiques")
-                            
-                            viz_types = st.multiselect(
-                                "Sélectionnez les types de visualisation:",
-                                ["Coupe 2D Interpolée", "Volume 3D", "Profils Verticaux", "Carte de Contours"],
-                                default=["Coupe 2D Interpolée", "Profils Verticaux"]
-                            )
-                            
-                            if st.button("🚀 GÉNÉRER VISUALISATIONS", type="primary", use_container_width=True):
-                                with st.spinner("Génération des visualisations..."):
-                                    
-                                    if "Coupe 2D Interpolée" in viz_types:
-                                        st.markdown("#### 🗺️ Coupe 2D - Profil de Résistivité Interpolé")
-                                        
-                                        interp_method = st.selectbox(
-                                            "Méthode d'interpolation:",
-                                            ["cubic", "linear", "nearest"],
-                                            index=0
-                                        )
-                                        
-                                        fig_2d, info_2d = survey_parser.create_2d_section(
-                                            interpolation_method=interp_method,
-                                            resolution=100,
-                                            title="Coupe 2D - Profil de Résistivité"
-                                        )
-                                        
-                                        st.plotly_chart(fig_2d, use_container_width=True)
-                                        
-                                        st.info(f"✅ Interpolation {interp_method} | {info_2d['num_points']} points mesurés | Résolution {info_2d['resolution']}x{info_2d['resolution']}")
-                                    
-                                    if "Volume 3D" in viz_types:
-                                        st.markdown("#### 🧊 Volume 3D - Visualisation Interactive")
-                                        
-                                        fig_3d, info_3d = survey_parser.create_3d_volume()
-                                        st.plotly_chart(fig_3d, use_container_width=True)
-                                        
-                                        st.info("✅ Volume 3D généré | Rotation interactive activée")
-                                    
-                                    if "Profils Verticaux" in viz_types:
-                                        st.markdown("#### 📉 Profils Verticaux par Survey Point")
-                                        
-                                        fig_prof, info_prof = survey_parser.create_vertical_profiles()
-                                        st.plotly_chart(fig_prof, use_container_width=True)
-                                        
-                                        st.info(f"✅ {info_prof['num_profiles']} profils verticaux générés")
-                                    
-                                    if "Carte de Contours" in viz_types:
-                                        st.markdown("#### 🗺️ Carte de Contours - Isolignes")
-                                        
-                                        num_levels = st.slider("Nombre de niveaux:", 5, 30, 15)
-                                        
-                                        fig_cont, info_cont = survey_parser.create_contour_map(num_levels=num_levels)
-                                        st.plotly_chart(fig_cont, use_container_width=True)
-                                        
-                                        st.info(f"✅ Carte de contours avec {num_levels} niveaux")
-                                    
-                                    st.success("✅ Toutes les visualisations générées avec succès !")
-                            
-                            # Sauvegarder dans session state
-                            st.session_state['survey_data'] = df_survey
-                            st.session_state['survey_parser'] = survey_parser
-            
-            except Exception as e:
-                # Pas de format survey détecté, continuer normalement
-                pass
-            
-            st.markdown("---")
-            st.subheader("🧠 Analyse Intelligente Kibali - Données ERT")
-            st.info("Kibali analyse les données avec son intelligence géophysique pour détecter incohérences et rendre les données cohérentes")
-            
-            # Détecter si données ERT (résistivités)
-            is_ert_data = any(10 <= val <= 10000 for val in numbers[:50])  # Plage typique résistivité
-            
-            if is_ert_data:
-                with st.expander("⚙️ Configuration Contexte Géologique", expanded=False):
-                    context_choice = st.selectbox(
-                        "Zone géographique / contexte:",
-                        ["gabon", "sahel", "automatique"],
-                        index=0,
-                        help="Kibali adapte son analyse selon le contexte géologique"
-                    )
-                
-                if st.button("🚀 LANCER ANALYSE INTELLIGENTE KIBALI", type="primary", use_container_width=True):
-                    with st.spinner("🧠 Kibali analyse les données avec son intelligence..."):
-                        # Créer profondeurs synthétiques si pas disponibles
-                        n_points = len(numbers)
-                        depths = list(np.linspace(0, n_points * 0.5, n_points))  # 0.5m spacing
-                        resistivities = numbers
-                        
-                        # Analyse intelligente
-                        kibali_results = kibali_analyze_ert(depths, resistivities, context=context_choice if context_choice != "automatique" else "gabon")
-                        
-                        # Afficher synthèse intelligente
-                        st.markdown("### 📋 Synthèse Intelligente Kibali")
-                        st.markdown(kibali_results["synthese_intelligente"])
-                        
-                        # Onglets détaillés
-                        tab1, tab2, tab3, tab4 = st.tabs(["✅ Validation", "🔧 Corrections", "🪨 Couches", "💧 Hydrogéologie"])
-                        
-                        with tab1:
-                            validation = kibali_results["validation_stratigraphique"]
-                            
-                            col_v1, col_v2 = st.columns(2)
-                            with col_v1:
-                                if validation["valid"]:
-                                    st.success(f"✅ Données COHÉRENTES")
-                                else:
-                                    st.warning(f"⚠️ Anomalies détectées")
-                            with col_v2:
-                                st.metric("Score Cohérence", f"{validation['score_coherence']}/100")
-                            
-                            if validation['anomalies']:
-                                st.markdown("#### ❌ Anomalies Critiques")
-                                for anom in validation['anomalies']:
-                                    st.error(f"• {anom['message']}")
-                            
-                            if validation['warnings']:
-                                st.markdown("#### ⚠️ Avertissements")
-                                for warn in validation['warnings']:
-                                    st.warning(f"• {warn['message']}")
-                        
-                        with tab2:
-                            corrections = kibali_results["corrections_appliquees"]
-                            if corrections:
-                                st.info(f"🔧 Kibali a appliqué {len(corrections)} corrections intelligentes")
-                                corr_df = pd.DataFrame(corrections)
-                                st.dataframe(corr_df, use_container_width=True)
-                                
-                                # Bouton télécharger données corrigées
-                                corrected_data = kibali_results["donnees_corrigees"]
-                                corrected_csv = pd.DataFrame({
-                                    "Profondeur (m)": corrected_data["profondeurs"],
-                                    "Résistivité Originale (Ω.m)": corrected_data["resistivites_originales"],
-                                    "Résistivité Corrigée (Ω.m)": corrected_data["resistivites_corrigees"]
-                                })
-                                st.download_button(
-                                    "📥 Télécharger Données Corrigées (CSV)",
-                                    corrected_csv.to_csv(index=False).encode('utf-8'),
-                                    f"{uploaded_file.name}_kibali_corrected.csv",
-                                    "text/csv"
-                                )
-                            else:
-                                st.success("✅ Aucune correction nécessaire - Données déjà cohérentes")
-                        
-                        with tab3:
-                            layers = kibali_results["couches_geologiques"]
-                            st.markdown(f"#### 🪨 {len(layers)} Couches Géologiques Identifiées")
-                            
-                            for i, layer in enumerate(layers, 1):
-                                with st.expander(f"Couche {i}: {layer['profondeur_debut']:.1f}-{layer['profondeur_fin']:.1f}m ({layer['epaisseur']:.1f}m)"):
-                                    col_l1, col_l2 = st.columns(2)
-                                    with col_l1:
-                                        st.metric("Type", layer['type_geologique'])
-                                        st.metric("Profondeur", f"{layer['profondeur_debut']:.1f} - {layer['profondeur_fin']:.1f} m")
-                                    with col_l2:
-                                        st.metric("Épaisseur", f"{layer['epaisseur']:.1f} m")
-                                        st.metric("Résistivité", f"{layer['resistivite_moyenne']:.1f} Ω.m")
-                                    
-                                    st.info(layer['description'])
-                        
-                        with tab4:
-                            hydro = kibali_results["analyse_hydrogeologique"]
-                            
-                            col_h1, col_h2, col_h3 = st.columns(3)
-                            with col_h1:
-                                potential_color = {"faible": "🔴", "moyen": "🟡", "bon": "🟢", "excellent": "🟢"}
-                                st.metric("Potentiel Hydrique", f"{potential_color.get(hydro['potentiel_hydrique'], '⚪')} {hydro['potentiel_hydrique'].upper()}")
-                            with col_h2:
-                                if hydro['profondeur_nappe_estimee']:
-                                    st.metric("Nappe Phréatique", f"{hydro['profondeur_nappe_estimee']:.1f} m")
-                                else:
-                                    st.metric("Nappe Phréatique", "Profonde")
-                            with col_h3:
-                                st.metric("Zones Aquifères", len(hydro['couches_aquiferes']))
-                            
-                            if hydro['recommandations']:
-                                st.markdown("#### 📋 Recommandations Kibali")
-                                for rec in hydro['recommandations']:
-                                    st.success(f"✓ {rec}")
-                        
-                        # Sauvegarder résultats dans session state
-                        st.session_state['kibali_ert_analysis'] = kibali_results
-                        st.success("✅ Analyse intelligente Kibali terminée!")
-            else:
-                st.warning("⚠️ Données ne semblent pas être de type ERT (résistivité). Analyse intelligente non applicable.")
-        
-        st.markdown("---")
         st.subheader("🎯 Clustering KMeans")
         n_clusters = st.slider("Nombre de clusters", 2, 10, 3)
         labels, centers = cluster_numbers(numbers, n_clusters=n_clusters)
@@ -5584,82 +5097,7 @@ PERFORMANCE: Mode {mode_display} activé pour traitement optimisé.
                 enhanced_response = ""
                
                 # Détecter le type de demande
-                is_visualization_request = any(keyword in prompt.lower() for keyword in [
-                    "coupe", "graphique", "visualisation", "visualise", "génère", "génerer", 
-                    "graphe", "plot", "diagramme", "carte", "profil", "section", "image",
-                    "montre", "affiche", "crée", "dessine", "couleur", "couleurs"
-                ])
-                
-                is_analysis_request = any(keyword in prompt.lower() for keyword in [
-                    "recherche", "approfondie", "analyse", "données", "résistivité"
-                ])
-                
-                # PRIORITÉ 1: Génération de visualisation graphique
-                if is_visualization_request and st.session_state.current_file_data:
-                    try:
-                        st.info("🎨 **Génération de visualisation en cours...**")
-                        
-                        # Initialiser l'agent graphique si nécessaire
-                        if st.session_state.graph_agent is None:
-                            with st.spinner("🔧 Chargement du moteur de visualisation avancé..."):
-                                st.session_state.graph_agent = GraphGenerationAgent()
-                        
-                        # Initialiser le moteur avancé si nécessaire
-                        if st.session_state.advanced_viz_engine is None:
-                            with st.spinner("🚀 Initialisation du moteur PyGIMLI + OpenCV..."):
-                                st.session_state.advanced_viz_engine = AdvancedVisualizationEngine()
-                        
-                        # Extraire les données du fichier actuel
-                        file_data = st.session_state.current_file_data
-                        data_array = np.array(file_data)
-                        
-                        # Générer la visualisation avec le moteur avancé
-                        st.success("✨ **Génération de la coupe avec PyGIMLI + Matplotlib...**")
-                        
-                        viz_result = st.session_state.advanced_viz_engine.create_complete_ert_section(
-                            data=data_array,
-                            title=f"Coupe ERT - {st.session_state.get('current_filename', 'Données')}"
-                        )
-                        
-                        if viz_result and 'figure' in viz_result:
-                            st.pyplot(viz_result['figure'])
-                            st.success("✅ **Visualisation générée avec succès !**")
-                            
-                            # Générer une explication intelligente avec l'agent
-                            explanation = st.session_state.graph_agent.generate_explanation(
-                                graph_type="2d_section",
-                                data_summary={
-                                    'min': float(np.min(data_array)),
-                                    'max': float(np.max(data_array)),
-                                    'mean': float(np.mean(data_array)),
-                                    'points': len(data_array)
-                                }
-                            )
-                            
-                            st.markdown("### 📊 Analyse de la coupe")
-                            st.markdown(explanation)
-                            
-                            # Sauvegarder dans l'historique
-                            assistant_response = f"""✅ **Coupe de résistivité générée !**
-
-{explanation}
-
-**Caractéristiques de la visualisation:**
-- Type: Coupe 2D avec interpolation
-- Données: {len(data_array)} points
-- Plage: {np.min(data_array):.2f} - {np.max(data_array):.2f} Ω.m
-- Moteur: PyGIMLI + Matplotlib + OpenCV
-"""
-                            st.session_state.messages.append({"role": "assistant", "content": assistant_response})
-                            st.stop()  # Arrêter ici, visualisation complète
-                            
-                    except Exception as e:
-                        st.error(f"❌ Erreur lors de la génération graphique: {e}")
-                        import traceback
-                        st.code(traceback.format_exc())
-                
-                # PRIORITÉ 2: Analyse avec recherche
-                if is_analysis_request:
+                if any(keyword in prompt.lower() for keyword in ["recherche", "approfondie", "analyse", "données", "résistivité"]):
                     # Effectuer recherche web
                     try:
                         web_results = web_search_enhanced(prompt + " ERT geophysics electrical resistivity")
@@ -5737,7 +5175,7 @@ PERFORMANCE: Mode {mode_display} activé pour traitement optimisé.
                             outputs = model.generate(
                                 inputs,
                                 attention_mask=attention_mask,
-                                max_new_tokens=3000,  # AUGMENTÉ pour réponses COMPLÈTES
+                                max_new_tokens=2000,
                                 temperature=0.6,
                                 do_sample=True,
                                 top_p=0.9,
@@ -5750,7 +5188,7 @@ PERFORMANCE: Mode {mode_display} activé pour traitement optimisé.
                         outputs = model.generate(
                             inputs,
                             attention_mask=attention_mask,
-                            max_new_tokens=3000,  # AUGMENTÉ pour réponses COMPLÈTES
+                            max_new_tokens=2000,
                             temperature=0.6,
                             do_sample=True,
                             top_p=0.9,
@@ -5831,7 +5269,7 @@ Réponse détaillée:"""
                             outputs = model.generate(
                                 inputs,
                                 attention_mask=attention_mask,
-                                max_new_tokens=3000,  # AUGMENTÉ pour réponses COMPLÈTES
+                                max_new_tokens=1000,
                                 temperature=0.7,
                                 do_sample=True,
                                 top_p=0.9,
@@ -5843,7 +5281,7 @@ Réponse détaillée:"""
                         outputs = model.generate(
                             inputs,
                             attention_mask=attention_mask,
-                            max_new_tokens=3000,  # AUGMENTÉ pour réponses COMPLÈTES
+                            max_new_tokens=1000,
                             temperature=0.7,
                             do_sample=True,
                             top_p=0.9,
@@ -7317,7 +6755,7 @@ def get_llm(model_name):
             repo_id=model_name,
             huggingfacehub_api_token=HF_TOKEN,
             temperature=0.3,
-            max_new_tokens=3000  # AUGMENTÉ pour réponses COMPLÈTES
+            max_new_tokens=600
         )
         st.write(f"✅ Utilisation API pour {model_name}")
         return llm
@@ -8396,136 +7834,29 @@ def analyze_uploaded_file_realtime(uploaded_file, chat_history, agent, vectordb,
         # BINAIRE
         else:
             with st.status("🔢 Analyse binaire...", expanded=True) as status:
-                # 🆕 DÉTECTION ET PARSING AUTOMATIQUE MULTI-FRÉQUENCES pour .dat
-                if file_extension == 'dat':
-                    st.write("🔬 **Détection fichier .dat - Test parseur multi-fréquences...**")
+                try:
+                    entropy_result = entropy_analysis(file_bytes)
+                    compression_result = compression_ratio(file_bytes)
+                    pattern_result = pattern_recognition(file_bytes)
                     
-                    try:
-                        # Sauvegarder temporairement le fichier
-                        import tempfile
-                        temp_dir = tempfile.gettempdir()
-                        temp_file_path = os.path.join(temp_dir, uploaded_file.name)
-                        
-                        with open(temp_file_path, 'wb') as f:
-                            f.write(file_bytes)
-                        
-                        # Tenter le parsing multi-fréquences
-                        from multi_freq_ert_parser import MultiFreqERTParser
-                        parser = MultiFreqERTParser()
-                        df = parser.parse_multiple_files([temp_file_path])
-                        
-                        if not df.empty and len(df) > 0:
-                            st.success(f"✅ **PARSEUR MULTI-FRÉQUENCES ACTIVÉ !**")
-                            st.write(f"📊 {len(df)} mesures ERT chargées")
-                            st.write(f"📡 {len(parser.frequencies)} fréquences détectées")
-                            st.write(f"📍 {len(parser.survey_points)} survey points")
-                            
-                            # Afficher aperçu de la structure
-                            with st.expander("📋 Structure des données (5 premières lignes)"):
-                                st.dataframe(df[['project', 'survey_point', 'depth', 'frequency_MHz', 'resistivity']].head())
-                            
-                            # Coordonnées spatiales
-                            coords_df = parser.get_coordinates_corrected()
-                            with st.expander("📐 Coordonnées spatiales (X, Y, Z)"):
-                                st.dataframe(coords_df[['x', 'y', 'z', 'resistivity', 'frequency_MHz']].head())
-                            
-                            # Sauvegarder dans session_state
-                            st.session_state['multi_freq_data'] = df
-                            st.session_state['multi_freq_coords'] = coords_df
-                            st.session_state['multi_freq_parser'] = parser
-                            
-                            # Mettre à jour extracted_data
-                            extracted_data["metadata"] = {
-                                "type": "ERT_MULTI_FREQ",
-                                "num_measurements": len(df),
-                                "num_frequencies": len(parser.frequencies),
-                                "num_survey_points": len(parser.survey_points),
-                                "frequencies_MHz": [float(f) for f in parser.frequencies[:10]],  # 10 premières
-                                "depth_range": (float(parser.metadata['depth_range'][0]), float(parser.metadata['depth_range'][1])),
-                                "resistivity_range": (float(parser.metadata['resistivity_range'][0]), float(parser.metadata['resistivity_range'][1]))
-                            }
-                            
-                            extracted_data["content"] = f"""Données ERT Multi-Fréquences:
-- {len(df)} mesures
-- {len(parser.frequencies)} fréquences (de {min(parser.frequencies):.2f} à {max(parser.frequencies):.2f} MHz)
-- {len(parser.survey_points)} survey points
-- Profondeurs: {parser.metadata['depth_range'][0]:.1f} à {parser.metadata['depth_range'][1]:.1f} m
-- Résistivités: {parser.metadata['resistivity_range'][0]:.2f} à {parser.metadata['resistivity_range'][1]:.2f} Ω·m
-
-Structure correcte validée:
-project | survey_point | depth | frequency_MHz | resistivity
-
-Coordonnées spatiales (X,Y,Z) calculées automatiquement.
-"""
-                            
-                            technical_summary = f"Fichier ERT multi-fréquences: {len(df)} mesures, {len(parser.frequencies)} fréquences"
-                            status.update(label="✅ Fichier ERT parsé avec succès!", state="complete")
-                            
-                        else:
-                            # Fallback vers analyse binaire classique
-                            st.info("ℹ️ Format ERT non détecté, analyse binaire standard...")
-                            entropy_result = entropy_analysis(file_bytes)
-                            compression_result = compression_ratio(file_bytes)
-                            pattern_result = pattern_recognition(file_bytes)
-                            
-                            extracted_data["metadata"] = {
-                                "entropy": entropy_result,
-                                "compression": compression_result,
-                                "patterns": pattern_result
-                            }
-                            
-                            with st.expander("🔍 Analyse détaillée"):
-                                st.write(f"**Entropie:** {entropy_result}")
-                                st.write(f"**Compression:** {compression_result}")
-                                st.write(f"**Patterns:** {pattern_result}")
-                            
-                            technical_summary = f"Fichier binaire .dat de {file_size:,} octets"
-                            status.update(label="✅ Analyse binaire terminée", state="complete")
+                    extracted_data["metadata"] = {
+                        "entropy": entropy_result,
+                        "compression": compression_result,
+                        "patterns": pattern_result
+                    }
                     
-                    except Exception as e:
-                        st.warning(f"⚠️ Parseur multi-fréquences échoué: {e}")
-                        st.info("Passage en mode analyse binaire standard...")
-                        
-                        # Fallback vers analyse binaire
-                        entropy_result = entropy_analysis(file_bytes)
-                        compression_result = compression_ratio(file_bytes)
-                        pattern_result = pattern_recognition(file_bytes)
-                        
-                        extracted_data["metadata"] = {
-                            "entropy": entropy_result,
-                            "compression": compression_result,
-                            "patterns": pattern_result
-                        }
-                        
-                        technical_summary = f"Fichier binaire .dat de {file_size:,} octets"
-                        status.update(label="⚠️ Analyse binaire (fallback)", state="complete")
-                
-                else:
-                    # Fichiers binaires non-.dat
-                    try:
-                        entropy_result = entropy_analysis(file_bytes)
-                        compression_result = compression_ratio(file_bytes)
-                        pattern_result = pattern_recognition(file_bytes)
-                        
-                        extracted_data["metadata"] = {
-                            "entropy": entropy_result,
-                            "compression": compression_result,
-                            "patterns": pattern_result
-                        }
-                        
-                        with st.expander("🔍 Analyse détaillée"):
-                            st.write(f"**Entropie:** {entropy_result}")
-                            st.write(f"**Compression:** {compression_result}")
-                            st.write(f"**Patterns:** {pattern_result}")
-                        
-                        technical_summary = f"Fichier binaire .{file_extension} de {file_size/1024:.2f} KB"
-                        st.success(f"✅ {technical_summary}")
-                        status.update(label="✅ Analyse binaire terminée", state="complete")
+                    with st.expander("🔍 Analyse détaillée"):
+                        st.write(f"**Entropie:** {entropy_result}")
+                        st.write(f"**Compression:** {compression_result}")
+                        st.write(f"**Patterns:** {pattern_result}")
                     
-                    except Exception as e:
-                        technical_summary = f"Fichier binaire .{file_extension}"
-                        st.warning(f"⚠️ Analyse partielle: {e}")
-                        status.update(label="⚠️ Analyse partielle", state="complete")
+                    technical_summary = f"Fichier binaire .{file_extension} de {file_size/1024:.2f} KB"
+                    st.success(f"✅ {technical_summary}")
+                    status.update(label="✅ Analyse binaire terminée", state="complete")
+                except Exception as e:
+                    technical_summary = f"Fichier binaire .{file_extension}"
+                    st.warning(f"⚠️ Analyse partielle: {e}")
+                    status.update(label="⚠️ Analyse partielle", state="complete")
         
         # === ÉTAPE 3: RECHERCHE WEB CONTEXTUELLE ===
         web_context = ""
@@ -8732,24 +8063,6 @@ class KibaliToolsManager:
                 "description": "Affiche la correspondance couleur-résistivité selon normes ERT",
                 "function": self.show_color_mapping,
                 "keywords": ["couleur", "palette", "colormap", "légende"]
-            },
-            "dat_structure_analyzer": {
-                "name": "Analyseur de Structure de Fichiers .DAT",
-                "description": "Analyse automatiquement la structure de fichiers .DAT (encodage, délimiteur, colonnes)",
-                "function": self.analyze_dat_structure,
-                "keywords": ["structure", "dat", "analyse", "format", "encodage", "délimiteur", "colonnes"]
-            },
-            "survey_depth_parser": {
-                "name": "Parseur Survey-Point / Depth / Data",
-                "description": "Parseur spécialisé pour fichiers avec colonnes survey-point, depth, data (profils ERT verticaux)",
-                "function": self.parse_survey_depth_data,
-                "keywords": ["survey", "point", "depth", "profondeur", "profil", "vertical", "coupe", "3d", "volume"]
-            },
-            "multi_freq_parser": {
-                "name": "Parseur Multi-Fréquences ERT (Fichiers Complémentaires)",
-                "description": "Parse et fusionne plusieurs fichiers .dat avec multi-fréquences (MHz), calcule coordonnées spatiales correctes (X, Y, Z)",
-                "function": self.parse_multi_freq_data,
-                "keywords": ["multi", "fréquence", "mhz", "complémentaire", "fusionner", "fusion", "coordonnées", "spatial", "xyz", "plusieurs fichiers"]
             }
         }
     
@@ -9029,111 +8342,6 @@ class KibaliToolsManager:
                 "message": f"❌ Erreur: {e}"
             }
     
-    def analyze_dat_structure(self, data: dict, query: str = "") -> dict:
-        """Analyse automatiquement la structure d'un fichier .DAT"""
-        try:
-            file_path = data.get("physical_path", "")
-            if not file_path:
-                return {
-                    "success": False,
-                    "message": "❌ Aucun chemin de fichier fourni"
-                }
-            
-            # Utiliser l'analyseur intelligent
-            structure = analyze_dat_file(file_path)
-            
-            if structure:
-                return {
-                    "success": True,
-                    "structure": structure,
-                    "message": f"✅ Structure analysée: {structure.file_type} | Confiance: {structure.confidence}%"
-                }
-            else:
-                return {
-                    "success": False,
-                    "message": "❌ Impossible d'analyser la structure du fichier"
-                }
-                
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"❌ Erreur analyse structure: {e}"
-            }
-    
-    def parse_survey_depth_data(self, data: dict, query: str = "") -> dict:
-        """Parseur spécialisé pour fichiers survey-point/depth/data - DISABLED"""
-        return {
-            "success": False,
-            "message": "⚠️ Parseur survey-depth désactivé (calculs incorrects). Utilisez multi_freq_parser à la place."
-        }
-    
-    def parse_multi_freq_data(self, data: dict, query: str = "") -> dict:
-        """
-        Parseur multi-fréquences pour fichiers .dat complémentaires
-        Calcule les coordonnées spatiales correctes (X, Y, Z)
-        """
-        try:
-            # Vérifier si des fichiers multiples sont disponibles dans session_state
-            if 'multi_freq_data' in st.session_state and st.session_state.multi_freq_data is not None:
-                parser = st.session_state.get('multi_freq_parser')
-                df = st.session_state.multi_freq_data
-                coords_df = st.session_state.get('multi_freq_coords')
-                
-                return {
-                    "success": True,
-                    "data": df,
-                    "coordinates": coords_df,
-                    "parser": parser,
-                    "metadata": parser.metadata if parser else {},
-                    "message": f"✅ Données multi-fréquences disponibles: {len(df)} mesures, {len(parser.frequencies)} fréquences"
-                }
-            
-            # Sinon, essayer de parser un seul fichier
-            file_path = data.get("physical_path", "")
-            if not file_path or not os.path.exists(file_path):
-                return {
-                    "success": False,
-                    "message": "❌ Aucun fichier disponible. Uploadez des fichiers .dat dans l'interface multi-fréquences."
-                }
-            
-            # Parser le fichier
-            from multi_freq_ert_parser import MultiFreqERTParser
-            parser = MultiFreqERTParser()
-            df = parser.parse_multiple_files([file_path])
-            
-            if df.empty:
-                return {
-                    "success": False,
-                    "message": "❌ Aucune donnée extraite. Vérifiez le format du fichier."
-                }
-            
-            # Générer coordonnées
-            coords_df = parser.get_coordinates_corrected()
-            
-            # Sauvegarder dans session state
-            st.session_state['multi_freq_data'] = df
-            st.session_state['multi_freq_coords'] = coords_df
-            st.session_state['multi_freq_parser'] = parser
-            
-            return {
-                "success": True,
-                "data": df,
-                "coordinates": coords_df,
-                "parser": parser,
-                "metadata": parser.metadata,
-                "frequencies": parser.frequencies,
-                "survey_points": parser.survey_points,
-                "message": f"✅ Fichier parsé: {len(df)} mesures, {len(parser.frequencies)} fréquences, {len(parser.survey_points)} survey points"
-            }
-            
-        except Exception as e:
-            import traceback
-            return {
-                "success": False,
-                "message": f"❌ Erreur parseur multi-fréquences: {e}",
-                "traceback": traceback.format_exc()
-            }
-    
     def execute_tools(self, tool_ids: list, data: dict, query: str = "") -> dict:
         """
         Exécute plusieurs outils et retourne les résultats combinés
@@ -9204,14 +8412,10 @@ INSTRUCTIONS:
 Réponds maintenant:"""
     
     try:
-        # Utiliser Qwen pour générer la réponse avec LIMITE AUGMENTÉE
+        # Utiliser Qwen pour générer la réponse
         if qwen_llm:
             from langchain.schema import HumanMessage
-            # Configuration pour générer des réponses LONGUES et DÉTAILLÉES
-            response = qwen_llm.invoke(
-                [HumanMessage(content=context)],
-                config={"max_tokens": 3000, "temperature": 0.7}  # 3000 tokens
-            )
+            response = qwen_llm.invoke([HumanMessage(content=context)])
             llm_response = response.content if hasattr(response, 'content') else str(response)
         else:
             # Fallback si Qwen n'est pas disponible
@@ -9408,37 +8612,6 @@ def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph,
     # 🎯 ENRICHISSEMENT AUTOMATIQUE DU CONTEXTE FICHIER
     # Si un fichier est uploadé, toujours l'ajouter au contexte de la conversation
     file_context_prompt = ""
-    
-    # 📊 CONTEXTE MULTI-FRÉQUENCES ERT
-    multi_freq_context = ""
-    if 'multi_freq_data' in st.session_state and st.session_state.multi_freq_data is not None:
-        parser = st.session_state.get('multi_freq_parser')
-        if parser:
-            multi_freq_context = f"""
-
-📡 **DONNÉES ERT MULTI-FRÉQUENCES CHARGÉES**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📁 Fichiers fusionnés: {parser.metadata['num_files']}
-📡 Fréquences: {', '.join([f'{f:.1f} MHz' for f in parser.frequencies])}
-📍 Survey points: {parser.metadata['num_survey_points']}
-📏 Profondeurs: {parser.metadata['depth_range'][0]:.1f}m à {parser.metadata['depth_range'][1]:.1f}m
-📊 Total mesures: {parser.metadata['total_measurements']:,}
-🔬 Résistivités: {parser.metadata['resistivity_range'][0]:.2f} - {parser.metadata['resistivity_range'][1]:.2f} Ω·m
-
-💡 **Tu peux accéder aux DataFrames**:
-- `st.session_state.multi_freq_data` : Données complètes
-- `st.session_state.multi_freq_coords` : Coordonnées spatiales (X, Y, Z)
-- `st.session_state.multi_freq_parser` : Objet parseur avec toutes les méthodes
-
-🎨 **Méthodes de visualisation disponibles**:
-- `parser.create_2d_section_by_frequency(freq)` : Coupe 2D pour une fréquence
-- `parser.create_3d_volume()` : Volume 3D interactif
-- `parser.create_frequency_comparison()` : Comparaison multi-fréquences
-- `parser.get_coordinates_corrected()` : Coordonnées spatiales corrigées
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
-    
     if 'uploaded_file_data' in st.session_state and st.session_state.uploaded_file_data:
         file_data = st.session_state.uploaded_file_data
         file_context_prompt = f"""
@@ -9448,7 +8621,6 @@ def handle_chat_enhanced(message, history, agent, model_choice, vectordb, graph,
 📂 Chemin physique: {file_data.get('physical_path', 'N/A')}
 📊 Type: {file_data.get('extension', 'N/A')}
 💾 Taille: {file_data['size']} octets ({file_data['size']/1024:.2f} KB)
-{multi_freq_context}
 
 📝 **Métadonnées extraites**:
 {file_data.get('metadata', 'Aucune métadonnée')}
@@ -9559,530 +8731,6 @@ QUESTION DE L'UTILISATEUR:
         # Laisser Kibali répondre naturellement avec le contexte
         message = kibali_message  # Remplacer le message par celui enrichi avec le contexte fichier
         response = None  # Kibali va générer sa réponse plus bas
-    
-    # 🎨 DÉTECTION DE DEMANDE DE GRAPHIQUE (Agent Graphique)
-    # Si l'utilisateur demande un graphique, coupe, profil, visualisation
-    if any(kw in original_message.lower() for kw in ['graphique', 'coupe', 'profil', 'visuali', 'courbe', 'histogram', 'plot', 'section']):
-        if 'uploaded_file_data' in st.session_state and st.session_state.uploaded_file_data:
-            # Charger l'agent graphique si nécessaire
-            if st.session_state.graph_agent is None:
-                with st.spinner("🎨 Chargement de l'agent de génération de graphiques..."):
-                    try:
-                        st.session_state.graph_agent = GraphGenerationAgent()
-                        st.session_state.graph_agent_loaded = True
-                        print("✅ Agent graphique chargé")
-                    except Exception as e:
-                        print(f"❌ Erreur chargement agent graphique: {e}")
-                        st.session_state.graph_agent = None
-            
-            # Charger le moteur de visualisation avancé (PyGIMLI + OpenCV + Matplotlib)
-            if 'advanced_viz_engine' not in st.session_state:
-                with st.spinner("🚀 Chargement du moteur de visualisation avancé..."):
-                    try:
-                        st.session_state.advanced_viz_engine = AdvancedVisualizationEngine()
-                        print("✅ Moteur avancé chargé (PyGIMLI + OpenCV + Matplotlib)")
-                    except Exception as e:
-                        print(f"❌ Erreur chargement moteur avancé: {e}")
-                        st.session_state.advanced_viz_engine = None
-            
-            # Si l'agent est chargé, générer le graphique
-            if st.session_state.graph_agent is not None:
-                with st.status("🎨 Génération du graphique...", expanded=True) as status:
-                    try:
-                        # Lire les données du fichier
-                        physical_path = st.session_state.uploaded_file_data.get('physical_path')
-                        
-                        st.write("📂 Lecture du fichier...")
-                        with open(physical_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            content = f.read()
-                        
-                        # Extraire les données
-                        st.write("🔍 Extraction des données...")
-                        import re, numpy as np
-                        numbers = re.findall(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?', content)
-                        all_values = [float(x) for x in numbers if x]
-                        
-                        if len(all_values) == 0:
-                            st.error("❌ Aucune donnée numérique trouvée")
-                        else:
-                            st.write(f"✅ {len(all_values)} valeurs extraites")
-                            
-                            # Déterminer le type de graphique
-                            request_info = st.session_state.graph_agent.understand_request(
-                                original_message,
-                                {'values': all_values, 'filename': st.session_state.uploaded_file_data.get('filename')}
-                            )
-                            
-                            st.write(f"🎯 Type détecté: {request_info['graph_type']}")
-                            
-                            # Générer le graphique approprié
-                            if request_info['graph_type'] == '3d_volume':
-                                # Volume 3D
-                                st.write("🎨 Création du volume 3D interactif...")
-                                
-                                # Préparer données pour 3D
-                                resistivity = np.array(all_values)
-                                n = len(resistivity)
-                                
-                                # Créer grille 3D automatique
-                                n_side = int(np.cbrt(n)) + 1
-                                st.write(f"   Grille 3D: {n_side}×{n_side}×{n_side} ({n_side**3} voxels)")
-                                
-                                x = np.linspace(0, 100, n_side)
-                                y = np.linspace(0, 100, n_side)
-                                z = np.linspace(0, -50, n_side)
-                                X, Y, Z = np.meshgrid(x, y, z, indexing='ij')
-                                
-                                x_coords = X.flatten()
-                                y_coords = Y.flatten()
-                                z_coords = Z.flatten()
-                                
-                                # Adapter résistivité à la grille
-                                n_total = len(x_coords)
-                                if n < n_total:
-                                    resistivity = np.pad(resistivity, (0, n_total - n), mode='edge')
-                                else:
-                                    resistivity = resistivity[:n_total]
-                                
-                                st.write(f"   Plage résistivité: {resistivity.min():.2f} - {resistivity.max():.2f} Ω·m")
-                                
-                                # Générer avec agent
-                                output_path, graph_info = st.session_state.graph_agent.create_3d_volume(
-                                    x_coords, y_coords, z_coords, resistivity,
-                                    title=f"Volume 3D - {st.session_state.uploaded_file_data.get('filename')}",
-                                    output_path="/tmp/ert_3d_volume.html"
-                                )
-                                
-                                # Explication
-                                st.write("📝 Génération de l'explication...")
-                                explanation = st.session_state.graph_agent.generate_explanation(
-                                    graph_info,
-                                    max_tokens=1000
-                                )
-                                
-                                status.update(label="✅ Volume 3D généré!", state="complete")
-                                
-                                st.success(f"✅ Volume 3D sauvegardé: {output_path}")
-                                
-                                # Bouton téléchargement
-                                with open(output_path, 'r', encoding='utf-8') as f:
-                                    html_content = f.read()
-                                
-                                st.download_button(
-                                    label="📥 Télécharger volume 3D interactif (HTML)",
-                                    data=html_content,
-                                    file_name="volume_3d_sous_sol.html",
-                                    mime="text/html"
-                                )
-                                
-                                # Afficher dans iframe
-                                st.components.v1.html(html_content, height=850, scrolling=True)
-                                
-                                response = f"""🎨 **VOLUME 3D GÉNÉRÉ**
-
-{explanation}
-
-### 📊 Caractéristiques du Volume 3D
-- **Fichier**: {st.session_state.uploaded_file_data.get('filename')}
-- **Points de mesure**: {len(resistivity)}
-- **Résistivité**: {resistivity.min():.2f} - {resistivity.max():.2f} Ω·m
-- **Volume**: {x.max():.1f}m × {y.max():.1f}m × {abs(z.min()):.1f}m
-- **Interactivité**: Rotation, zoom, survol pour valeurs
-- **Format**: HTML avec Plotly (visualisation 3D interactive)
-
-### 🎯 Utilisation
-✅ **Cliquez et glissez** pour faire tourner le volume
-✅ **Molette** pour zoomer/dézoomer
-✅ **Survolez** les points pour voir les valeurs
-✅ **Légende** à droite avec échelle de couleurs
-
-📥 **Téléchargement disponible ci-dessus**
-"""
-                                return response
-                            
-                            elif request_info['graph_type'] == '2d_section':
-                                # Coupe 2D
-                                st.write("🎨 Création de la coupe 2D...")
-                                
-                                # AUTO-DÉTECTION du format de données
-                                if len(all_values) % 4 == 0 and len(all_values) >= 40:
-                                    # Format complet: x, y, z, rho (4 colonnes)
-                                    st.write("   Format détecté: 4 colonnes (x, y, z, résistivité)")
-                                    num_points = len(all_values) // 4
-                                    data = np.array(all_values).reshape(num_points, 4)
-                                    x, y, z, rho = data[:, 0], data[:, 1], data[:, 2], data[:, 3]
-                                elif len(all_values) % 3 == 0 and len(all_values) >= 30:
-                                    # Format 3 colonnes: x, z, rho
-                                    st.write("   Format détecté: 3 colonnes (x, z, résistivité)")
-                                    num_points = len(all_values) // 3
-                                    data = np.array(all_values).reshape(num_points, 3)
-                                    x, z, rho = data[:, 0], data[:, 1], data[:, 2]
-                                else:
-                                    # Format simple: juste résistivité → créer grille automatique
-                                    st.write("   Format détecté: Valeurs simples → création grille automatique")
-                                    rho = np.array(all_values)
-                                    n = len(rho)
-                                    
-                                    # Créer une grille 2D intelligente
-                                    # Essayer de détecter si c'est une grille rectangulaire
-                                    best_shape = None
-                                    for width in range(int(np.sqrt(n)), max(10, int(np.sqrt(n)//2)), -1):
-                                        if n % width == 0:
-                                            height = n // width
-                                            if 2 <= height <= 50:  # Limites raisonnables
-                                                best_shape = (height, width)
-                                                break
-                                    
-                                    if best_shape:
-                                        height, width = best_shape
-                                        st.write(f"   Grille détectée: {height} profondeurs × {width} positions")
-                                    else:
-                                        # Par défaut: 1 profil vertical ou grille carrée
-                                        width = min(20, int(np.ceil(np.sqrt(n))))
-                                        height = int(np.ceil(n / width))
-                                        st.write(f"   Grille créée: {height}×{width}")
-                                    
-                                    # Créer coordonnées
-                                    x = np.tile(np.arange(width), height)[:n]  # Positions horizontales
-                                    z = np.repeat(np.arange(height), width)[:n]  # Profondeurs
-                                    rho = rho[:len(x)]  # Ajuster si nécessaire
-                                
-                                st.write(f"   Points: {len(rho)}, X: {x.min():.1f}-{x.max():.1f}, Z: {z.min():.1f}-{z.max():.1f}")
-                                
-                                # UTILISER LE MOTEUR AVANCÉ si disponible
-                                if st.session_state.advanced_viz_engine is not None:
-                                    st.write("🚀 Utilisation du moteur avancé (PyGIMLI + Matplotlib + OpenCV)...")
-                                    try:
-                                        # Préparer les données au format approprié
-                                        if 'x' in locals() and 'y' in locals():
-                                            # Format complet 4 colonnes
-                                            data_for_viz = np.column_stack([x, y, z, rho])
-                                        else:
-                                            # Format 3 colonnes (x, z, rho)
-                                            data_for_viz = np.column_stack([x, z, rho])
-                                        
-                                        # Créer la visualisation intelligente
-                                        fig = st.session_state.advanced_viz_engine.create_intelligent_visualization(
-                                            data_for_viz,
-                                            request_text=original_message,
-                                            color_scheme='resistivity'
-                                        )
-                                        
-                                        # Sauvegarder et afficher
-                                        output_path = "/tmp/ert_section_advanced.png"
-                                        fig.savefig(output_path, dpi=300, bbox_inches='tight')
-                                        st.image(output_path, use_container_width=True)
-                                        
-                                        # Proposer téléchargement
-                                        with open(output_path, 'rb') as f:
-                                            st.download_button(
-                                                label="📥 Télécharger coupe haute résolution (PNG)",
-                                                data=f.read(),
-                                                file_name="coupe_ert_avancee.png",
-                                                mime="image/png"
-                                            )
-                                        
-                                        # Générer explication avec l'agent
-                                        st.write("📝 Génération de l'explication...")
-                                        graph_info = {
-                                            'type': '2d_section',
-                                            'n_points': len(rho),
-                                            'resistivity_range': (rho.min(), rho.max()),
-                                            'x_range': (x.min(), x.max()),
-                                            'z_range': (z.min(), z.max())
-                                        }
-                                        explanation = st.session_state.graph_agent.generate_explanation(
-                                            graph_info,
-                                            max_tokens=1000  # Explication détaillée
-                                        )
-                                        
-                                        status.update(label="✅ Coupe avancée générée!", state="complete")
-                                        
-                                        response = f"""🎨 **COUPE ERT AVANCÉE GÉNÉRÉE** (PyGIMLI + Matplotlib)
-
-{explanation}
-
-### 📊 Statistiques du Graphique
-- **Fichier**: {st.session_state.uploaded_file_data.get('filename')}
-- **Points de mesure**: {len(rho)}
-- **Résistivité**: {rho.min():.2f} - {rho.max():.2f} Ω·m (échelle log)
-- **Distance**: {x.min():.1f} - {x.max():.1f} m
-- **Profondeur**: {z.min():.1f} - {z.max():.1f} m
-- **Interpolation**: RBF (Radial Basis Function) + Filtre gaussien
-- **Annotations**: Zones géologiques automatiques
-
-### 🎯 Caractéristiques de la visualisation
-✅ Interpolation avancée pour lissage optimal
-✅ Contours avec valeurs annotées
-✅ Profil moyen de résistivité
-✅ Zones géologiques colorées
-✅ Haute résolution (300 DPI)
-
-📥 **Téléchargement haute résolution disponible ci-dessus**
-"""
-                                        return response
-                                        
-                                    except Exception as e:
-                                        st.warning(f"⚠️ Moteur avancé échoué: {e}. Fallback sur méthode standard.")
-                                        print(f"Erreur moteur avancé: {e}")
-                                        import traceback
-                                        traceback.print_exc()
-                                        # Continuer avec la méthode standard ci-dessous
-                                
-                                # FALLBACK: Méthode standard avec graph_agent
-                                output_path, graph_info = st.session_state.graph_agent.create_2d_section(
-                                    x, z, rho,
-                                    title=f"Coupe ERT 2D - {st.session_state.uploaded_file_data.get('filename')}",
-                                    output_path="/tmp/ert_section_2d.html"
-                                )
-                                
-                                # Générer explication
-                                st.write("📝 Génération de l'explication...")
-                                explanation = st.session_state.graph_agent.generate_explanation(
-                                    graph_info,
-                                    max_tokens=800  # Explication détaillée
-                                )
-                                
-                                status.update(label="✅ Graphique généré avec succès!", state="complete")
-                                
-                                # Afficher le résultat
-                                st.success(f"✅ Graphique sauvegardé: {output_path}")
-                                
-                                # Bouton de téléchargement
-                                with open(output_path, 'r', encoding='utf-8') as f:
-                                    html_content = f.read()
-                                
-                                st.download_button(
-                                    label="📥 Télécharger le graphique HTML",
-                                    data=html_content,
-                                    file_name="coupe_ert_2d.html",
-                                    mime="text/html"
-                                )
-                                
-                                # Afficher dans iframe
-                                st.components.v1.html(html_content, height=650, scrolling=True)
-                                
-                                # Retourner l'explication
-                                response = f"""🎨 **GRAPHIQUE GÉNÉRÉ**
-
-{explanation}
-
-### 📊 Statistiques du Graphique
-- **Fichier**: {st.session_state.uploaded_file_data.get('filename')}
-- **Points de mesure**: {len(rho)}
-- **Résistivité**: {rho.min():.2f} - {rho.max():.2f} Ω·m
-- **Distance**: {x.min():.1f} - {x.max():.1f} m
-- **Profondeur**: {z.min():.1f} - {z.max():.1f} m
-
-📥 **Téléchargement disponible ci-dessus**
-"""
-                                return response
-                                
-                            elif request_info['graph_type'] in ['profile_1d', 'line_plot']:
-                                # Profil 1D
-                                resistivity = np.array(all_values)
-                                depths = np.arange(len(resistivity))
-                                
-                                st.write("📈 Création du profil vertical...")
-                                output_path, graph_info = st.session_state.graph_agent.create_profile_1d(
-                                    depths, resistivity,
-                                    title=f"Profil de Résistivité - {st.session_state.uploaded_file_data.get('filename')}",
-                                    output_path="/tmp/ert_profile_1d.html"
-                                )
-                                
-                                # Explication
-                                explanation = st.session_state.graph_agent.generate_explanation(
-                                    graph_info,
-                                    max_tokens=800
-                                )
-                                
-                                status.update(label="✅ Profil généré!", state="complete")
-                                
-                                st.success(f"✅ Profil sauvegardé: {output_path}")
-                                
-                                # Bouton téléchargement
-                                with open(output_path, 'r', encoding='utf-8') as f:
-                                    html_content = f.read()
-                                
-                                st.download_button(
-                                    label="📥 Télécharger le profil HTML",
-                                    data=html_content,
-                                    file_name="profil_ert_1d.html",
-                                    mime="text/html"
-                                )
-                                
-                                st.components.v1.html(html_content, height=750, scrolling=True)
-                                
-                                response = f"""📈 **PROFIL VERTICAL GÉNÉRÉ**
-
-{explanation}
-
-### 📊 Statistiques
-- **Mesures**: {len(resistivity)}
-- **Résistivité min**: {resistivity.min():.2f} Ω·m
-- **Résistivité max**: {resistivity.max():.2f} Ω·m
-- **Résistivité moyenne**: {resistivity.mean():.2f} Ω·m
-- **Résistivité médiane**: {np.median(resistivity):.2f} Ω·m
-
-📥 **Téléchargement disponible ci-dessus**
-"""
-                                return response
-                            
-                            elif request_info['graph_type'] == 'statistics_table':
-                                # Tableau statistiques
-                                resistivity = np.array(all_values)
-                                
-                                st.write("📊 Création du tableau statistique...")
-                                output_path, graph_info = st.session_state.graph_agent.create_statistics_table(
-                                    resistivity,
-                                    output_path="/tmp/ert_statistics.html"
-                                )
-                                
-                                explanation = st.session_state.graph_agent.generate_explanation(
-                                    graph_info,
-                                    max_tokens=600
-                                )
-                                
-                                status.update(label="✅ Tableau généré!", state="complete")
-                                
-                                with open(output_path, 'r', encoding='utf-8') as f:
-                                    html_content = f.read()
-                                
-                                st.download_button(
-                                    label="📥 Télécharger le tableau HTML",
-                                    data=html_content,
-                                    file_name="statistiques_ert.html",
-                                    mime="text/html"
-                                )
-                                
-                                st.components.v1.html(html_content, height=550, scrolling=True)
-                                
-                                response = f"""📊 **TABLEAU STATISTIQUE GÉNÉRÉ**
-
-{explanation}
-
-📥 **Téléchargement disponible ci-dessus**
-"""
-                                return response
-                            
-                            elif any(kw in original_message.lower() for kw in ['rapport', 'complet', 'analyse complete', 'tout', 'global']):
-                                # RAPPORT STRUCTURÉ COMPLET
-                                st.write("📋 Génération du rapport structuré complet...")
-                                
-                                # Préparer les données
-                                if len(all_values) % 4 == 0:
-                                    num_points = len(all_values) // 4
-                                    data_array = np.array(all_values).reshape(num_points, 4)
-                                    data_dict = {
-                                        'x': data_array[:, 0],
-                                        'y': data_array[:, 1],
-                                        'z': data_array[:, 2],
-                                        'resistivity': data_array[:, 3]
-                                    }
-                                else:
-                                    data_dict = {
-                                        'x': np.arange(len(all_values)),
-                                        'y': np.zeros(len(all_values)),
-                                        'z': np.zeros(len(all_values)),
-                                        'resistivity': np.array(all_values)
-                                    }
-                                
-                                # Générer le rapport
-                                output_path, graph_info = st.session_state.graph_agent.generate_structured_report(
-                                    data_dict,
-                                    original_message,
-                                    output_path="/tmp/rapport_ert_complet.html"
-                                )
-                                
-                                # Explication avec max 1000 tokens
-                                explanation = st.session_state.graph_agent.generate_explanation(
-                                    graph_info,
-                                    max_tokens=1000  # Maximum pour rapport complet
-                                )
-                                
-                                status.update(label="✅ Rapport complet généré!", state="complete")
-                                
-                                with open(output_path, 'r', encoding='utf-8') as f:
-                                    html_content = f.read()
-                                
-                                # Boutons de téléchargement multiples
-                                col1, col2, col3 = st.columns(3)
-                                
-                                with col1:
-                                    st.download_button(
-                                        label="📥 HTML Complet",
-                                        data=html_content,
-                                        file_name="rapport_ert_complet.html",
-                                        mime="text/html"
-                                    )
-                                
-                                with col2:
-                                    # Export CSV
-                                    csv_data = "X,Y,Z,Resistivity\\n"
-                                    for i in range(len(data_dict['resistivity'])):
-                                        csv_data += f"{data_dict['x'][i]},{data_dict['y'][i]},{data_dict['z'][i]},{data_dict['resistivity'][i]}\\n"
-                                    
-                                    st.download_button(
-                                        label="📊 Données CSV",
-                                        data=csv_data,
-                                        file_name="donnees_ert.csv",
-                                        mime="text/csv"
-                                    )
-                                
-                                with col3:
-                                    # Export JSON
-                                    import json
-                                    json_data = json.dumps({
-                                        'metadata': {
-                                            'filename': st.session_state.uploaded_file_data.get('filename'),
-                                            'n_points': len(data_dict['resistivity']),
-                                            'date': datetime.now().isoformat()
-                                        },
-                                        'statistics': graph_info.get('statistics', {}),
-                                        'data': {
-                                            'x': data_dict['x'].tolist(),
-                                            'y': data_dict['y'].tolist(),
-                                            'z': data_dict['z'].tolist(),
-                                            'resistivity': data_dict['resistivity'].tolist()
-                                        }
-                                    }, indent=2)
-                                    
-                                    st.download_button(
-                                        label="📦 Données JSON",
-                                        data=json_data,
-                                        file_name="donnees_ert.json",
-                                        mime="application/json"
-                                    )
-                                
-                                # Afficher le rapport
-                                st.components.v1.html(html_content, height=800, scrolling=True)
-                                
-                                response = f"""📋 **RAPPORT STRUCTURÉ COMPLET GÉNÉRÉ**
-
-{explanation}
-
-### 📊 Contenu du Rapport:
-✅ **Statistiques globales** - Cartes avec métriques clés
-✅ **Classification géologique** - Tableau détaillé des matériaux
-✅ **Analyse hydrogéologique** - Zones d'eau et recommandations
-✅ **Graphiques interactifs** - Visualisations intégrées
-✅ **Boutons de téléchargement** - HTML, CSV, JSON, PDF
-
-### 📥 Téléchargements Disponibles:
-- **HTML Complet**: Rapport interactif avec tous les graphiques
-- **CSV**: Données brutes pour analyses externes
-- **JSON**: Format structuré pour traitement automatisé
-
-💡 **Astuce**: Cliquez sur "Imprimer/PDF" dans le rapport pour générer un PDF professionnel!
-"""
-                                return response
-                    
-                    except Exception as e:
-                        status.update(label="❌ Erreur de génération", state="error")
-                        st.error(f"Erreur: {e}")
-                        print(f"❌ Erreur agent graphique: {e}")
-                        import traceback
-                        traceback.print_exc()
     
     # MODE HUMAIN: Analyser la question avant de répondre
     if mode == "humain":
@@ -10896,22 +9544,6 @@ with st.sidebar:
     #     st.session_state.code_agent = None
     #     st.session_state.code_agent_loaded = False
     
-    # AGENT DE GÉNÉRATION DE GRAPHIQUES
-    if "graph_agent" not in st.session_state:
-        # Initialiser l'agent de graphiques en mode LAZY
-        st.session_state.graph_agent = None
-        st.session_state.graph_agent_loaded = False
-    
-    # MOTEUR DE VISUALISATION AVANCÉ (PyGIMLI + OpenCV + Matplotlib)
-    if "advanced_viz_engine" not in st.session_state:
-        st.session_state.advanced_viz_engine = None
-    
-    # DONNÉES DU FICHIER ACTUEL POUR VISUALISATION
-    if "current_file_data" not in st.session_state:
-        st.session_state.current_file_data = None
-    if "current_filename" not in st.session_state:
-        st.session_state.current_filename = None
-    
     if "voice_agent" not in st.session_state:
         # Initialiser le Voice Agent (streaming pour fluidité)
         st.session_state.voice_agent = None  # Chargement lazy au premier usage
@@ -11470,222 +10102,77 @@ with main_container:
         col_upload, col_info = st.columns([3, 1])
         
         with col_upload:
-            uploaded_files = st.file_uploader(
-                "📂 Glissez un ou plusieurs fichiers ici (multi-sélection pour .dat complémentaires)",
+            uploaded_file = st.file_uploader(
+                "Glissez un fichier ici ou cliquez pour parcourir",
                 type=None,  # Accepte tous les types
-                help="Images, PDF, CSV, JSON, fichiers ERT multi-fréquences (.dat), etc. Pour les fichiers .dat: uploadez tous les fichiers complémentaires en une fois pour fusion automatique.",
-                key="chat_file_upload",
-                accept_multiple_files=True  # 🆕 MULTI-FICHIERS ACTIVÉ
+                help="Images, PDF, CSV, JSON, fichiers binaires, etc.",
+                key="chat_file_upload"
             )
         
         with col_info:
-            if uploaded_files:
-                if len(uploaded_files) == 1:
-                    st.success(f"✅ {uploaded_files[0].name}")
-                    file_size_mb = uploaded_files[0].size / (1024 * 1024)
-                    st.caption(f"Taille: {file_size_mb:.2f} MB")
-                else:
-                    st.success(f"✅ {len(uploaded_files)} fichiers")
-                    total_size = sum(f.size for f in uploaded_files) / (1024 * 1024)
-                    st.caption(f"Total: {total_size:.2f} MB")
-                    
-                    # Afficher liste des fichiers
-                    with st.expander("📋 Fichiers uploadés"):
-                        for uf in uploaded_files:
-                            st.write(f"• {uf.name} ({uf.size/(1024*1024):.2f} MB)")
+            if uploaded_file:
+                st.success(f"✅ {uploaded_file.name}")
+                file_size_mb = uploaded_file.size / (1024 * 1024)
+                st.caption(f"Taille: {file_size_mb:.2f} MB")
         
-        # Traiter les fichiers uploadés
-        if uploaded_files is not None and len(uploaded_files) > 0:
-            # Stocker les fichiers dans session_state pour usage ultérieur
+        # Traiter le fichier uploadé
+        if uploaded_file is not None:
+            # Stocker le fichier dans session_state pour usage ultérieur
             if 'uploaded_file_data' not in st.session_state:
                 st.session_state.uploaded_file_data = None
             
-            if st.button("🔍 Analyser ces fichiers", type="primary", use_container_width=True):
-                with st.spinner("🤖 Kibali analyse vos fichiers en profondeur..."):
+            if st.button("🔍 Analyser ce fichier", type="primary", use_container_width=True):
+                with st.spinner("🤖 Kibali analyse votre fichier en profondeur..."):
+                    # Sauvegarder le fichier physiquement dans un dossier temporaire
                     import tempfile
                     temp_dir = tempfile.gettempdir()
+                    temp_file_path = os.path.join(temp_dir, uploaded_file.name)
                     
-                    # 🆕 DÉTECTION MULTI-FICHIERS .dat POUR FUSION
-                    dat_files = [f for f in uploaded_files if f.name.lower().endswith('.dat')]
-                    other_files = [f for f in uploaded_files if not f.name.lower().endswith('.dat')]
+                    # Écrire le fichier
+                    with open(temp_file_path, 'wb') as f:
+                        f.write(uploaded_file.getvalue())
                     
-                    # Si plusieurs fichiers .dat → Fusion multi-fréquences automatique
-                    if len(dat_files) > 1:
-                        st.info(f"🔬 **{len(dat_files)} fichiers .dat détectés → Fusion multi-fréquences automatique**")
-                        
-                        # Sauvegarder tous les fichiers .dat
-                        dat_paths = []
-                        for dat_file in dat_files:
-                            temp_path = os.path.join(temp_dir, dat_file.name)
-                            with open(temp_path, 'wb') as f:
-                                f.write(dat_file.getvalue())
-                            dat_paths.append(temp_path)
-                            st.write(f"   • {dat_file.name}")
-                        
-                        # Parser avec fusion
-                        try:
-                            from multi_freq_ert_parser import MultiFreqERTParser
-                            parser = MultiFreqERTParser()
-                            df = parser.parse_multiple_files(dat_paths)
-                            
-                            if not df.empty and len(df) > 0:
-                                st.success(f"✅ **FUSION RÉUSSIE !**")
-                                st.write(f"📊 {len(df)} mesures ERT fusionnées")
-                                st.write(f"📡 {len(parser.frequencies)} fréquences détectées")
-                                st.write(f"📍 {len(parser.survey_points)} survey points")
-                                
-                                # Afficher structure
-                                with st.expander("📋 Structure fusionnée (10 premières lignes)"):
-                                    st.dataframe(df[['project', 'survey_point', 'depth', 'frequency_MHz', 'resistivity']].head(10))
-                                
-                                # Coordonnées
-                                coords_df = parser.get_coordinates_corrected()
-                                with st.expander("📐 Coordonnées spatiales (X, Y, Z)"):
-                                    st.dataframe(coords_df[['x', 'y', 'z', 'resistivity', 'frequency_MHz']].head(10))
-                                
-                                # Sauvegarder en session
-                                st.session_state['multi_freq_data'] = df
-                                st.session_state['multi_freq_coords'] = coords_df
-                                st.session_state['multi_freq_parser'] = parser
-                                
-                                # Créer données pour le chat
-                                file_data = {
-                                    'filename': f"fusion_{len(dat_files)}_fichiers.dat",
-                                    'physical_path': dat_paths[0],  # Premier fichier comme référence
-                                    'all_paths': dat_paths,
-                                    'size': sum(f.size for f in dat_files),
-                                    'extension': 'dat',
-                                    'metadata': {
-                                        "type": "ERT_MULTI_FREQ_FUSION",
-                                        "num_files": len(dat_files),
-                                        "num_measurements": len(df),
-                                        "num_frequencies": len(parser.frequencies),
-                                        "num_survey_points": len(parser.survey_points),
-                                        "frequencies_MHz": [float(f) for f in sorted(parser.frequencies)[:20]],
-                                        "depth_range": (float(parser.metadata['depth_range'][0]), float(parser.metadata['depth_range'][1])),
-                                        "resistivity_range": (float(parser.metadata['resistivity_range'][0]), float(parser.metadata['resistivity_range'][1]))
-                                    },
-                                    'content': f"""Données ERT Multi-Fréquences (FUSION de {len(dat_files)} fichiers):
-• {len(df)} mesures totales
-• {len(parser.frequencies)} fréquences (de {min(parser.frequencies):.2f} à {max(parser.frequencies):.2f} MHz)
-• {len(parser.survey_points)} survey points
-• Profondeurs: {parser.metadata['depth_range'][0]:.1f} à {parser.metadata['depth_range'][1]:.1f} m
-• Résistivités: {parser.metadata['resistivity_range'][0]:.2f} à {parser.metadata['resistivity_range'][1]:.2f} Ω·m
-
-Structure validée:
-project | survey_point | depth | frequency_MHz | resistivity
-
-Coordonnées spatiales (X,Y,Z) disponibles pour visualisation."""
-                                }
-                                
-                                st.session_state.uploaded_file_data = file_data
-                                
-                                # Message de Kibali
-                                kibali_analysis = f"""🎯 **Analyse de fusion multi-fréquences ERT**
-
-J'ai fusionné **{len(dat_files)} fichiers .dat complémentaires** avec succès !
-
-**📊 Résumé:**
-• **{len(df):,}** mesures ERT fusionnées
-• **{len(parser.frequencies)}** fréquences détectées ({min(parser.frequencies):.0f} - {max(parser.frequencies):.0f} MHz)
-• **{len(parser.survey_points)}** survey points
-• Profondeurs: **{parser.metadata['depth_range'][0]:.1f}** à **{parser.metadata['depth_range'][1]:.1f}** m
-
-**✅ Structure correcte validée:**
-```
-project | survey_point | depth | frequency_MHz | resistivity
-```
-
-**📐 Système de coordonnées:**
-• X = survey_point × 10m (espacement horizontal)
-• Y = 0m (ligne unique)
-• Z = profondeur absolue (valeur positive)
-
-**💡 Tu peux maintenant me demander:**
-• "Montre-moi les coordonnées spatiales"
-• "Génère une visualisation 2D par fréquence"
-• "Analyse les variations de résistivité"
-• "Export en Excel"
-"""
-                                
-                                with st.chat_message("assistant", avatar="⭐"):
-                                    st.markdown(kibali_analysis, unsafe_allow_html=True)
-                                
-                                # Sauvegarder dans historique
-                                st.session_state.chat_history.append({
-                                    "role": "user",
-                                    "content": f"📎 {len(dat_files)} fichiers .dat uploadés pour fusion"
-                                })
-                                st.session_state.chat_history.append({
-                                    "role": "assistant",
-                                    "content": kibali_analysis
-                                })
-                                
-                                st.success("✅ Fusion terminée ! Pose-moi toutes tes questions sur ces données ERT.")
-                            
-                            else:
-                                st.error("❌ Aucune donnée ERT détectée dans ces fichiers")
-                        
-                        except Exception as e:
-                            st.error(f"❌ Erreur lors de la fusion: {e}")
-                            st.info("💡 Les fichiers seront analysés individuellement...")
+                    # Stocker immédiatement le chemin physique pour le AI Code Agent
+                    # AVANT l'analyse, pour que le path soit disponible dès le premier message
+                    st.session_state.uploaded_file_data = {
+                        'filename': uploaded_file.name,
+                        'physical_path': temp_file_path,
+                        'size': uploaded_file.size
+                    }
                     
-                    # Si 1 seul fichier .dat ou autres fichiers
-                    if len(dat_files) <= 1 or other_files:
-                        # Utiliser le premier fichier (logique originale)
-                        uploaded_file = uploaded_files[0] if len(uploaded_files) == 1 else (dat_files[0] if dat_files else other_files[0])
-                        
-                        # Sauvegarder le fichier physiquement
-                        temp_file_path = os.path.join(temp_dir, uploaded_file.name)
-                        
-                        # Écrire le fichier
-                        with open(temp_file_path, 'wb') as f:
-                            f.write(uploaded_file.getvalue())
-                        # Écrire le fichier
-                        with open(temp_file_path, 'wb') as f:
-                            f.write(uploaded_file.getvalue())
-                        
-                        # Stocker immédiatement le chemin physique pour le AI Code Agent
-                        # AVANT l'analyse, pour que le path soit disponible dès le premier message
-                        st.session_state.uploaded_file_data = {
-                            'filename': uploaded_file.name,
-                            'physical_path': temp_file_path,
-                            'size': uploaded_file.size
-                        }
-                        
-                        # Analyse complète et intelligente par Kibali
-                        kibali_analysis, file_data = analyze_uploaded_file_realtime(
-                            uploaded_file,
-                            st.session_state.chat_history,
-                            st.session_state.agent,
-                            st.session_state.vectordb,
-                            st.session_state.graph,
-                            st.session_state.pois,
-                            web_search_toggle
-                        )
-                        
-                        # Ajouter le chemin physique aux données d'analyse
-                        file_data['physical_path'] = temp_file_path
-                        
-                        # Mettre à jour avec toutes les données d'analyse
-                        st.session_state.uploaded_file_data = file_data
-                        
-                        # Afficher l'analyse de Kibali dans le chat
-                        with st.chat_message("assistant", avatar="⭐"):
-                            st.markdown(kibali_analysis, unsafe_allow_html=True)
-                        
-                        # Sauvegarder dans l'historique
-                        st.session_state.chat_history.append({
-                            "role": "user",
-                            "content": f"📎 Fichier uploadé: {uploaded_file.name}"
-                        })
-                        st.session_state.chat_history.append({
-                            "role": "assistant",
-                            "content": kibali_analysis
-                        })
-                        
-                        st.success("✅ Analyse terminée ! Pose-moi toutes tes questions sur ce fichier.")
-                        st.info("💡 **Kibali est maintenant expert de ce fichier.** Je peux faire des recherches web supplémentaires si besoin !")
+                    # Analyse complète et intelligente par Kibali
+                    kibali_analysis, file_data = analyze_uploaded_file_realtime(
+                        uploaded_file,
+                        st.session_state.chat_history,
+                        st.session_state.agent,
+                        st.session_state.vectordb,
+                        st.session_state.graph,
+                        st.session_state.pois,
+                        web_search_toggle
+                    )
+                    
+                    # Ajouter le chemin physique aux données d'analyse
+                    file_data['physical_path'] = temp_file_path
+                    
+                    # Mettre à jour avec toutes les données d'analyse
+                    st.session_state.uploaded_file_data = file_data
+                    
+                    # Afficher l'analyse de Kibali dans le chat
+                    with st.chat_message("assistant", avatar="⭐"):
+                        st.markdown(kibali_analysis, unsafe_allow_html=True)
+                    
+                    # Sauvegarder dans l'historique
+                    st.session_state.chat_history.append({
+                        "role": "user",
+                        "content": f"📎 Fichier uploadé: {uploaded_file.name}"
+                    })
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": kibali_analysis
+                    })
+                    
+                    st.success("✅ Analyse terminée ! Pose-moi toutes tes questions sur ce fichier.")
+                    st.info("💡 **Kibali est maintenant expert de ce fichier.** Je peux faire des recherches web supplémentaires si besoin !")
         
         st.markdown("---")
         

@@ -6,10 +6,19 @@ Transcription (Whisper) + Synthèse vocale (Coqui TTS)
 import os
 import numpy as np
 import soundfile as sf
-import sounddevice as sd
 from typing import Optional, Tuple
 import tempfile
 import time
+
+# Import optionnel de sounddevice (nécessite PortAudio)
+try:
+    import sounddevice as sd
+    SOUNDDEVICE_AVAILABLE = True
+except (OSError, ImportError) as e:
+    print(f"⚠️  sounddevice non disponible: {e}")
+    print("💡 Pour activer l'enregistrement audio, installez: sudo apt-get install portaudio19-dev")
+    sd = None
+    SOUNDDEVICE_AVAILABLE = False
 
 class VoiceAgent:
     """Agent vocal pour Kibali Analyst avec Whisper + Coqui TTS"""
@@ -17,15 +26,18 @@ class VoiceAgent:
     def __init__(self, 
                  whisper_model: str = "base",
                  tts_model: str = "tts_models/fr/mai/tacotron2-DDC",
-                 cache_dir: str = "/root/.cache/voice_models"):
+                 cache_dir: str = None):
         """
         Args:
             whisper_model: 'tiny' (~1GB), 'base' (~1.5GB), 'small' (~2GB)
             tts_model: Modèle Coqui TTS français
-            cache_dir: Dossier de cache des modèles
+            cache_dir: Dossier de cache des modèles (défaut: ~/.cache/voice_models)
         """
         self.whisper_model_name = whisper_model
         self.tts_model_name = tts_model
+        # Utiliser le dossier home de l'utilisateur par défaut
+        if cache_dir is None:
+            cache_dir = os.path.expanduser("~/.cache/voice_models")
         self.cache_dir = cache_dir
         
         self.whisper = None
@@ -148,14 +160,33 @@ class VoiceAgent:
         Returns:
             np.ndarray: Audio enregistré
         """
+        if not SOUNDDEVICE_AVAILABLE:
+            print("❌ sounddevice non disponible - Enregistrement audio désactivé")
+            print("💡 Pour activer: sudo apt-get install portaudio19-dev && pip install sounddevice")
+            return np.array([])
+        
         print(f"🎤 Enregistrement ({duration}s)...")
         
         try:
+            # Vérifier qu'un périphérique audio est disponible
+            devices = sd.query_devices()
+            if not devices:
+                print("❌ Aucun périphérique audio détecté")
+                return np.array([])
+            
+            # Trouver le périphérique d'entrée par défaut
+            default_input = sd.default.device[0]
+            if default_input is None or default_input < 0:
+                print("❌ Pas de périphérique d'entrée audio configuré")
+                print("💡 Configurez un microphone ou désactivez le mode vocal")
+                return np.array([])
+            
             audio = sd.rec(
                 int(duration * sample_rate),
                 samplerate=sample_rate,
                 channels=1,
-                dtype='float32'
+                dtype='float32',
+                device=default_input
             )
             sd.wait()  # Attendre la fin
             
@@ -164,6 +195,7 @@ class VoiceAgent:
             
         except Exception as e:
             print(f"❌ Erreur enregistrement: {e}")
+            print("💡 Le mode vocal nécessite un microphone fonctionnel")
             return np.array([])
     
     def synthesize_speech(self, 
@@ -212,6 +244,10 @@ class VoiceAgent:
     
     def play_audio(self, audio_path: str):
         """Joue un fichier audio"""
+        if not SOUNDDEVICE_AVAILABLE:
+            print("❌ sounddevice non disponible (PortAudio manquant)")
+            return
+            
         try:
             data, sample_rate = sf.read(audio_path)
             sd.play(data, sample_rate)
@@ -279,31 +315,59 @@ class StreamingVoiceAgent(VoiceAgent):
         super().__init__(*args, **kwargs)
         self.is_recording = False
         self.recorded_chunks = []
+        self.stream = None
     
     def start_recording_stream(self, callback=None):
         """Démarre l'enregistrement en streaming"""
-        self.is_recording = True
-        self.recorded_chunks = []
+        if not SOUNDDEVICE_AVAILABLE:
+            print("❌ sounddevice non disponible - Enregistrement audio désactivé")
+            print("💡 Pour activer: sudo apt-get install portaudio19-dev && pip install sounddevice")
+            return
         
-        def audio_callback(indata, frames, time_info, status):
-            if status:
-                print(f"⚠️ {status}")
-            if self.is_recording:
-                self.recorded_chunks.append(indata.copy())
-                if callback:
-                    callback(indata)
-        
-        self.stream = sd.InputStream(
-            callback=audio_callback,
-            channels=1,
-            samplerate=16000,
-            dtype='float32'
-        )
-        self.stream.start()
-        print("🎤 Enregistrement streaming démarré")
+        try:
+            # Vérifier qu'un périphérique audio est disponible
+            devices = sd.query_devices()
+            if not devices:
+                print("❌ Aucun périphérique audio détecté")
+                return
+            
+            # Trouver le périphérique d'entrée par défaut
+            default_input = sd.default.device[0]
+            if default_input is None or default_input < 0:
+                print("❌ Pas de périphérique d'entrée audio configuré")
+                return
+                
+            self.is_recording = True
+            self.recorded_chunks = []
+            
+            def audio_callback(indata, frames, time_info, status):
+                if status:
+                    print(f"⚠️ {status}")
+                if self.is_recording:
+                    self.recorded_chunks.append(indata.copy())
+                    if callback:
+                        callback(indata)
+            
+            self.stream = sd.InputStream(
+                callback=audio_callback,
+                channels=1,
+                samplerate=16000,
+                dtype='float32',
+                device=default_input
+            )
+            self.stream.start()
+            print("🎤 Enregistrement streaming démarré")
+            
+        except Exception as e:
+            print(f"❌ Erreur démarrage enregistrement: {e}")
+            print("💡 Le mode vocal nécessite un microphone fonctionnel")
+            self.is_recording = False
     
     def stop_recording_stream(self) -> np.ndarray:
         """Arrête l'enregistrement et retourne l'audio"""
+        if not SOUNDDEVICE_AVAILABLE or self.stream is None:
+            return np.array([])
+            
         self.is_recording = False
         if hasattr(self, 'stream'):
             self.stream.stop()
@@ -334,7 +398,8 @@ def download_voice_models():
     print("\n1️⃣ Whisper (transcription)")
     print("   Modèle: base (~150MB)")
     import whisper
-    whisper.load_model("base", download_root="/root/.cache/voice_models/whisper")
+    cache_dir = os.path.expanduser("~/.cache/voice_models/whisper")
+    whisper.load_model("base", download_root=cache_dir)
     print("   ✅ Whisper téléchargé")
     
     # 2. Coqui TTS

@@ -723,6 +723,8 @@ INSTRUCTIONS:
 - Privilégie les informations récentes pour les sujets d'actualité
 - Sois précis et cite tes sources si nécessaire
 - Si certaines informations manquent, dis-le clairement et propose de clarifier basé sur l'historique
+- Pour les analyses ERT, géophysiques ou résistivité, recherche automatiquement dans ta base de données les tableaux de couleur de résistivité et mesures pour améliorer tes résultats d'analyses et coupes
+- Pour les visualisations géologiques ou du sous-sol, inspire-toi des coupes existantes dans ta base de connaissances et reproduis-les avec les outils graphiques pour obtenir des données du sous-sol réel
 RÉPONSE DÉTAILLÉE:"""
     try:
         client = create_client()

@@ -1,0 +1,48 @@
+# ========================================
+# Installation rapide et optimisée
+# Packages essentiels seulement
+# ========================================
+
+# === VOICE PROCESSING (Léger) ===
+openai-whisper>=20231117  # Whisper officiel
+soundfile>=0.12.1         # Audio I/O rapide
+librosa>=0.10.0          # Traitement audio optimisé
+
+# === 3D PROCESSING (Optimisé) ===
+open3d>=0.18.0           # 3D processing efficace
+
+# === PDF PROCESSING (Léger) ===
+pymupdf>=1.23.0          # PyMuPDF (fitz) - plus rapide que PyPDF2
+reportlab>=4.0.0         # Génération PDF native
+
+# === IMAGE PROCESSING (Optimisé) ===
+opencv-python>=4.8.0    # OpenCV optimisé
+scikit-image>=0.22.0    # Processing image scientifique
+imageio>=2.31.0         # I/O image rapide
+
+# === GEOSPATIAL (Essentiel) ===
+shapely>=2.0.0          # Géométrie rapide
+networkx>=3.2.0         # Graphes optimisés
+
+# === UTILITIES (Légers) ===
+rich>=13.7.0            # Interface console
+tqdm>=4.66.0            # Progress bars
+pyyaml>=6.0.1           # Config files
+click>=8.1.7            # CLI tools
+
+# === AUDIO OPTIONAL (si besoin vocal avancé) ===
+# TTS>=0.22.0             # Synthèse vocale (lourd ~1GB)
+# sounddevice>=0.4.6      # Audio device access
+# pydub>=0.25.1           # Audio manipulation
+
+# === 3D OPTIONAL (si besoin visualisation avancée) ===
+# pyvista>=0.43.0         # Visualisation 3D (lourd)
+# trimesh>=4.0.0          # Mesh processing
+
+# === GEOSPATIAL OPTIONAL (si besoin géospatial avancé) ===
+# geopandas>=0.14.0       # GIS (dépendances lourdes)
+# osmium>=3.6.0           # OpenStreetMap (dépendances système)
+
+# === PDF OPTIONAL (si besoin PDF avancé) ===
+# weasyprint>=60.0        # HTML to PDF (dépendances lourdes)
+# python-docx>=1.1.0      # Word documents
