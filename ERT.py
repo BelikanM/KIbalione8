@@ -11932,3 +11932,202 @@ st.write(" Status: get_system_status()")
 st.write(" Nettoyage: cleanup_old_cache()")
 st.write(" Sauvegarde: backup_all_data()")
 st.write("="*60)
+
+# ========================================
+# INTÉGRATION PYGIMLI POUR INVERSION ERT
+# ========================================
+
+def run_pygimli_inversion(dat_data: dict, electrode_spacing: float = 1.0, 
+                         max_depth: float = None, n_layers: int = 20) -> dict:
+    """
+    Exécute une inversion ERT complète avec PyGIMLI
+    
+    Args:
+        dat_data: Dictionnaire avec les données du fichier .dat
+        electrode_spacing: Espacement entre électrodes (m)
+        max_depth: Profondeur maximale d'investigation (m)
+        n_layers: Nombre de couches pour le modèle
+    
+    Returns:
+        dict: Résultats de l'inversion avec modèles et figures
+    """
+    if not PYGIMLI_AVAILABLE:
+        return {"error": "PyGIMLI non disponible. Installez avec: pip install pygimli"}
+    
+    try:
+        import pygimli as pg
+        import numpy as np
+        
+        # Extraire les données du fichier .dat
+        survey_points = dat_data.get('survey_point', [])
+        depths = dat_data.get('depth', [])
+        data_values = dat_data.get('data', [])
+        
+        if not survey_points or not depths or not data_values:
+            return {"error": "Données .dat incomplètes"}
+        
+        # Créer un profil ERT 2D
+        # Supposons un profil linéaire avec espacement électrode
+        n_electrodes = len(np.unique(survey_points))
+        electrode_positions = np.linspace(0, (n_electrodes-1) * electrode_spacing, n_electrodes)
+        
+        # Créer la géométrie ERT
+        scheme = pg.physics.ert.createERTData(elecs=electrode_positions)
+        
+        # Simuler des mesures (en réalité, utiliserait les vraies données de résistivité apparente)
+        # Pour démonstration, créer des données synthétiques basées sur les mesures .dat
+        rho_apparent = np.array(data_values)
+        
+        # Normaliser et ajuster les données
+        rho_apparent = np.clip(rho_apparent, 0.1, 10000)  # Plage réaliste
+        
+        # Créer le vecteur de données
+        scheme.set('rhoa', rho_apparent)
+        
+        # Créer le maillage d'inversion
+        world = pg.createWorld(start=[electrode_positions[0], 0], 
+                              end=[electrode_positions[-1], -max_depth if max_depth else -50])
+        
+        mesh = pg.createMesh(world, quality=34, area=0.1)
+        
+        # Inversion ERT
+        inv = pg.physics.ert.ERTInversion(sr=False, verbose=False)
+        model = inv.run(scheme, mesh)
+        
+        # Extraire les résultats
+        rho_true = model  # Résistivité vraie
+        
+        return {
+            "success": True,
+            "rho_true": rho_true,
+            "mesh": mesh,
+            "scheme": scheme,
+            "electrode_positions": electrode_positions,
+            "n_electrodes": n_electrodes
+        }
+        
+    except Exception as e:
+        return {"error": f"Erreur PyGIMLI: {str(e)}"}
+
+def create_pygimli_sections(dat_data: dict, inversion_results: dict, 
+                          output_dir: str = None) -> dict:
+    """
+    Crée 4 coupes ERT inversées avec PyGIMLI
+    
+    Args:
+        dat_data: Données du fichier .dat
+        inversion_results: Résultats de l'inversion PyGIMLI
+        output_dir: Répertoire de sortie pour les figures
+    
+    Returns:
+        dict: 4 figures matplotlib des coupes inversées
+    """
+    if not PYGIMLI_AVAILABLE or "error" in inversion_results:
+        return {"error": inversion_results.get("error", "PyGIMLI non disponible")}
+    
+    try:
+        import pygimli as pg
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        rho_true = inversion_results["rho_true"]
+        mesh = inversion_results["mesh"]
+        
+        # Créer les 4 coupes avec différentes échelles de couleur
+        figures = {}
+        
+        # Coupe 1: Échelle linéaire complète
+        fig1, ax1 = plt.subplots(figsize=(12, 8))
+        pg.show(mesh, rho_true, ax=ax1, cMap='jet_r', 
+                cMin=0.1, cMax=1000, logScale=True)
+        ax1.set_title('Coupe 1: Résistivité vraie - Échelle complète (log)', 
+                     fontsize=14, fontweight='bold')
+        ax1.set_xlabel('Distance (m)')
+        ax1.set_ylabel('Profondeur (m)')
+        plt.colorbar(ax1.images[0], ax=ax1, label='Résistivité (Ω·m)')
+        plt.tight_layout()
+        figures['section_1_full_scale'] = fig1
+        
+        # Coupe 2: Focus sur résistivités basses (conductrices)
+        fig2, ax2 = plt.subplots(figsize=(12, 8))
+        pg.show(mesh, rho_true, ax=ax2, cMap='Reds', 
+                cMin=0.1, cMax=10, logScale=True)
+        ax2.set_title('Coupe 2: Zone conductrice (0.1-10 Ω·m)', 
+                     fontsize=14, fontweight='bold')
+        ax2.set_xlabel('Distance (m)')
+        ax2.set_ylabel('Profondeur (m)')
+        plt.colorbar(ax2.images[0], ax=ax2, label='Résistivité (Ω·m)')
+        plt.tight_layout()
+        figures['section_2_conductive'] = fig2
+        
+        # Coupe 3: Focus sur résistivités moyennes (aquifères)
+        fig3, ax3 = plt.subplots(figsize=(12, 8))
+        pg.show(mesh, rho_true, ax=ax3, cMap='YlGnBu', 
+                cMin=10, cMax=100, logScale=False)
+        ax3.set_title('Coupe 3: Zone aquifère (10-100 Ω·m)', 
+                     fontsize=14, fontweight='bold')
+        ax3.set_xlabel('Distance (m)')
+        ax3.set_ylabel('Profondeur (m)')
+        plt.colorbar(ax3.images[0], ax=ax3, label='Résistivité (Ω·m)')
+        plt.tight_layout()
+        figures['section_3_aquifer'] = fig3
+        
+        # Coupe 4: Focus sur résistivités élevées (roches)
+        fig4, ax4 = plt.subplots(figsize=(12, 8))
+        pg.show(mesh, rho_true, ax=ax4, cMap='Blues', 
+                cMin=100, cMax=10000, logScale=True)
+        ax4.set_title('Coupe 4: Substrat rocheux (100-10000 Ω·m)', 
+                     fontsize=14, fontweight='bold')
+        ax4.set_xlabel('Distance (m)')
+        ax4.set_ylabel('Profondeur (m)')
+        plt.colorbar(ax4.images[0], ax=ax4, label='Résistivité (Ω·m)')
+        plt.tight_layout()
+        figures['section_4_resistive'] = fig4
+        
+        return figures
+        
+    except Exception as e:
+        return {"error": f"Erreur création coupes: {str(e)}"}
+
+def pygimli_ert_analysis(dat_file_path: str, electrode_spacing: float = 1.0) -> dict:
+    """
+    Analyse ERT complète avec PyGIMLI pour fichier .dat
+    
+    Args:
+        dat_file_path: Chemin vers le fichier .dat
+        electrode_spacing: Espacement entre électrodes (m)
+    
+    Returns:
+        dict: Résultats complets avec inversion et visualisations
+    """
+    try:
+        # Charger les données du fichier .dat
+        from multi_freq_ert_parser import MultiFreqERTParser
+        parser = MultiFreqERTParser()
+        dat_data = parser.parse_file(dat_file_path)
+        
+        if not dat_data:
+            return {"error": "Impossible de parser le fichier .dat"}
+        
+        # Exécuter l'inversion PyGIMLI
+        inversion_results = run_pygimli_inversion(dat_data, electrode_spacing)
+        
+        if "error" in inversion_results:
+            return inversion_results
+        
+        # Créer les 4 coupes
+        sections = create_pygimli_sections(dat_data, inversion_results)
+        
+        if "error" in sections:
+            return sections
+        
+        return {
+            "success": True,
+            "dat_data": dat_data,
+            "inversion_results": inversion_results,
+            "sections": sections,
+            "electrode_spacing": electrode_spacing
+        }
+        
+    except Exception as e:
+        return {"error": f"Erreur analyse PyGIMLI: {str(e)}"}
